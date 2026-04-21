@@ -1,0 +1,17 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Personal AI agent — Swift iOS + TS Railway backend + Convex data layer",
+  "scripts": {
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:build": "npm --prefix backend run build",
+    "backend:typecheck": "npm --prefix backend run typecheck"
+  },
+  "devDependencies": {
+    "convex": "^1.20.0",
+    "typescript": "^5.6.0"
+  }
+}
