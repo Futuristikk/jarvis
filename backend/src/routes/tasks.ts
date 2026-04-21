@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { convex } from "../convex.js";
+import { db } from "../db.js";
 
 export const tasks = new Hono();
 
@@ -17,14 +17,11 @@ tasks.post("/", async (c) => {
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);
   }
-
-  // Untyped call until `npx convex dev` generates `convex/_generated/api`.
-  // After first generation, swap for `convex.mutation(api.tasks.create, parsed.data)`.
-  const id = await convex.mutation("tasks:create" as never, parsed.data);
+  const id = await db.tasks.create(parsed.data);
   return c.json({ id }, 201);
 });
 
 tasks.get("/queued", async (c) => {
-  const rows = await convex.query("tasks:queued" as never, {});
+  const rows = await db.tasks.queued();
   return c.json({ tasks: rows });
 });
