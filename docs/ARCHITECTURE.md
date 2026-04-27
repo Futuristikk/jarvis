@@ -2,12 +2,18 @@
 
 ## Components
 
-### iOS app (`ios/`)
-- Swift / SwiftUI
+### Web PWA (`web/`)
+- Vite + React + TypeScript, installable PWA (added to home screen on iOS/Android)
+- Primary client today
 - Speaks only to the TS backend (HTTP for requests, WS or SSE for live updates)
 - Handles Google OAuth redirect, then hands tokens to the backend
-- Holds the WebRTC session with OpenAI Realtime
-- TestFlight distribution only
+- Holds the WebRTC session with OpenAI Realtime via the browser's native WebRTC stack
+- Service worker for offline shell + Web Push (iOS Safari supports Web Push for installed PWAs since 16.4)
+
+### Future iOS client (`ios/`)
+- Swift / SwiftUI, TestFlight distribution only
+- Same protocol as the PWA (HTTP + WS/SSE + WebRTC) — lift-and-shift, not rewrite
+- Deferred until an Apple Developer account is in play; directory is reserved
 
 ### TS backend (`backend/`)
 - TypeScript service deployed on Railway
@@ -17,15 +23,15 @@
 - Owns Google OAuth token refresh and Gmail/Calendar calls
 - Calls Claude API + web search for research
 - Persists state to Convex via the Convex TS client
-- Exposes WS or SSE for iOS live updates (tasks completing, agent messages, job status)
+- Exposes WS or SSE for client live updates (tasks completing, agent messages, job status)
 
 ### Convex (`convex/`)
 - Database + queries/mutations (typed schema)
 - Scheduled functions for lightweight polling loops (e.g. "every 5 min, flag overdue tasks")
-- The backend is the primary Convex client; iOS does not talk to Convex directly
+- The backend is the primary Convex client; clients (web/iOS) do not talk to Convex directly
 
 ### External services
-- **OpenAI Realtime** — iOS-side WebRTC. Backend mints ephemeral tokens and hydrates the system prompt with current state on session start.
+- **OpenAI Realtime** — client-side WebRTC (browser today, Swift later). Backend mints ephemeral tokens and hydrates the system prompt with current state on session start.
 - **Google** — Gmail + Calendar, OAuth tokens stored encrypted in Convex.
 - **GitHub** — fine-grained PAT, backend reads/writes side-project repos on Adam's behalf.
 
@@ -46,25 +52,25 @@ coding_jobs    { taskId, spec, repoTarget, status, logs, startedAt, finishedAt }
 
 ## Data flow: research task
 
-1. iOS → `POST /tasks` on backend (`type=research`, spec)
+1. Client → `POST /tasks` on backend (`type=research`, spec)
 2. Backend writes `tasks` row in Convex (status `queued`), pushes update down WS
 3. Backend worker picks up queued research tasks, calls Claude API / web search
 4. Writes to `research`, appends to `messages`, marks task `done`
-5. iOS gets WS update, renders results
+5. Client gets WS update, renders results
 
 ## Data flow: coding job
 
 1. Task of type `code` created (from agent planner or user)
 2. Backend launches a Pi-Mono agent job locally, configured with the fine-grained PAT scoped to `repoTarget`
 3. Job streams logs back to the backend, which mirrors them to `messages` + `coding_jobs.logs`
-4. On completion, backend updates `coding_jobs.status`, iOS gets WS update
+4. On completion, backend updates `coding_jobs.status`, client gets WS update
 5. Agent output can be a PR opened via GitHub API on the side-project repo
 
 ## Data flow: voice session
 
-1. iOS requests an ephemeral Realtime token from the backend
+1. Client requests an ephemeral Realtime token from the backend
 2. Backend pulls current projects, active tasks, recent research from Convex and composes a system prompt
-3. Returns token + system prompt; iOS opens WebRTC directly to OpenAI
+3. Returns token + system prompt; client opens WebRTC directly to OpenAI
 4. Realtime tools are proxied through the backend (same auth boundary) so the voice agent can read/write state
 
 ## Open questions
