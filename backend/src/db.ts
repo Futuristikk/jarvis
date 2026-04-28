@@ -30,8 +30,26 @@ export type TaskRow = {
   contextScope?: string;
   contextFiles?: string[];
   priorAnswersCount?: number;
+  scheduleId?: string;
+  autoSavePath?: string;
+  autoSaveError?: string;
   result?: string;
   completedAt?: number;
+};
+
+export type ScheduleRow = {
+  _id: string;
+  _creationTime: number;
+  name: string;
+  slug: string;
+  cron: string;
+  type: "research";
+  spec: string;
+  contextScope?: string;
+  active: boolean;
+  lastRunAt?: number;
+  nextRunAt: number;
+  lastTaskId?: string;
 };
 
 export const db = {
@@ -42,7 +60,13 @@ export const db = {
       priority?: number;
       spec: string;
       contextScope?: string;
+      scheduleId?: string;
     }) => untyped.mutation<string>("tasks:create", args),
+    setAutoSaveResult: (args: {
+      id: string;
+      path?: string;
+      error?: string;
+    }) => untyped.mutation<void>("tasks:setAutoSaveResult", args),
     setContextFiles: (id: string, files: string[]) =>
       untyped.mutation<void>("tasks:setContextFiles", { id, files }),
     setPriorAnswersCount: (id: string, count: number) =>
@@ -88,5 +112,31 @@ export const db = {
   projects: {
     list: () => untyped.query<unknown[]>("projects:list", {}),
     active: () => untyped.query<unknown[]>("projects:active", {}),
+  },
+  schedules: {
+    create: (args: {
+      name: string;
+      slug: string;
+      cron: string;
+      spec: string;
+      contextScope?: string;
+      nextRunAt: number;
+    }) => untyped.mutation<string>("schedules:create", args),
+    list: () => untyped.query<ScheduleRow[]>("schedules:list", {}),
+    get: (id: string) =>
+      untyped.query<ScheduleRow | null>("schedules:get", { id }),
+    due: (now: number) =>
+      untyped.query<ScheduleRow[]>("schedules:due", { now }),
+    advance: (args: {
+      id: string;
+      lastRunAt: number;
+      nextRunAt: number;
+      lastTaskId: string;
+    }) => untyped.mutation<void>("schedules:advance", args),
+    setActive: (id: string, active: boolean) =>
+      untyped.mutation<void>("schedules:setActive", { id, active }),
+    setNextRunAt: (id: string, nextRunAt: number) =>
+      untyped.mutation<void>("schedules:setNextRunAt", { id, nextRunAt }),
+    remove: (id: string) => untyped.mutation<void>("schedules:remove", { id }),
   },
 };

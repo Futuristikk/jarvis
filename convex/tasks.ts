@@ -13,6 +13,7 @@ export const create = mutation({
     priority: v.optional(v.number()),
     spec: v.string(),
     contextScope: v.optional(v.string()),
+    scheduleId: v.optional(v.id("schedules")),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("tasks", {
@@ -22,7 +23,19 @@ export const create = mutation({
       priority: args.priority ?? 0,
       spec: args.spec,
       contextScope: args.contextScope,
+      scheduleId: args.scheduleId,
     });
+  },
+});
+
+export const setAutoSaveResult = mutation({
+  args: {
+    id: v.id("tasks"),
+    path: v.optional(v.string()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, path, error }) => {
+    await ctx.db.patch(id, { autoSavePath: path, autoSaveError: error });
   },
 });
 

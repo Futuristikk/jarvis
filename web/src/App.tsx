@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   createResearchTask,
+  createSchedule,
+  deleteSchedule,
   getTask,
+  listSchedules,
   listTasks,
   listVaultScopes,
+  previewCron,
+  promoteTask,
+  runScheduleNow,
   saveTaskToVault,
+  setScheduleActive,
+  type PromoteResult,
+  type ScheduleRow,
   type TaskDetail,
   type TaskRow,
   type VaultBucket,
@@ -145,7 +154,10 @@ export default function App() {
                 onClick={() => setOpenId(openId === t._id ? null : t._id)}
               >
                 <StatusBadge status={t.status} />
-                <span style={S.taskSpec}>{t.spec}</span>
+                <span style={S.taskSpec}>
+                  {t.scheduleId ? "⏰ " : ""}
+                  {t.spec}
+                </span>
                 <span style={S.taskTime}>{fmt(t._creationTime)}</span>
               </button>
               {openId === t._id && detail?.task._id === t._id && (
@@ -155,7 +167,248 @@ export default function App() {
           ))}
         </ul>
       </section>
+
+      <SchedulesSection scopes={scopes} />
     </div>
+  );
+}
+
+function SchedulesSection({ scopes }: { scopes: string[] | null }) {
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const { schedules } = await listSchedules();
+      setSchedules(schedules);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return (
+    <section style={S.section}>
+      <div style={S.sectionHeader}>
+        <h2 style={S.h2}>Schedules</h2>
+        <button style={S.smallButton} onClick={() => setShowForm((s) => !s)}>
+          {showForm ? "Cancel" : "+ New"}
+        </button>
+      </div>
+      {err && <div style={S.error}>{err}</div>}
+      {showForm && (
+        <ScheduleForm
+          scopes={scopes}
+          onCreated={() => {
+            setShowForm(false);
+            refresh();
+          }}
+        />
+      )}
+      {schedules.length === 0 && !showForm && (
+        <p style={S.muted}>No schedules yet.</p>
+      )}
+      <ul style={S.list}>
+        {schedules.map((s) => (
+          <ScheduleItem key={s._id} sched={s} onChanged={refresh} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ScheduleForm({
+  scopes,
+  onCreated,
+}: {
+  scopes: string[] | null;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [cron, setCron] = useState("0 9 * * 1");
+  const [spec, setSpec] = useState("");
+  const [scope, setScope] = useState("");
+  const [preview, setPreview] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!cron) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      previewCron(cron).then((r) => {
+        if (cancelled) return;
+        if (r.valid && r.next) {
+          setPreview(`next: ${new Date(r.next).toLocaleString()}`);
+        } else {
+          setPreview(`invalid: ${r.error}`);
+        }
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [cron]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await createSchedule({
+        name: name.trim(),
+        cron: cron.trim(),
+        spec: spec.trim(),
+        contextScope: scope || undefined,
+      });
+      onCreated();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={S.scheduleForm}>
+      <label style={S.label}>
+        Name
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Saildock weekly news"
+          style={S.input}
+          required
+        />
+      </label>
+      <label style={S.label}>
+        Cron (Europe/Madrid)
+        <input
+          value={cron}
+          onChange={(e) => setCron(e.target.value)}
+          placeholder="0 9 * * 1"
+          style={S.input}
+          required
+        />
+        <span style={S.muted}>{preview}</span>
+      </label>
+      <label style={S.label}>
+        Question
+        <textarea
+          value={spec}
+          onChange={(e) => setSpec(e.target.value)}
+          placeholder="What new self-docking research came out this week?"
+          rows={3}
+          style={S.textarea}
+          required
+        />
+      </label>
+      <label style={S.label}>
+        Context scope
+        <select
+          value={scope}
+          onChange={(e) => setScope(e.target.value)}
+          style={S.select}
+          disabled={!scopes}
+        >
+          <option value="">none</option>
+          {scopes?.filter((s) => s !== "").map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </label>
+      {err && <div style={S.error}>{err}</div>}
+      <button
+        type="submit"
+        disabled={submitting || !name.trim() || !cron.trim() || !spec.trim()}
+        style={S.button}
+      >
+        {submitting ? "Creating…" : "Create schedule"}
+      </button>
+    </form>
+  );
+}
+
+function ScheduleItem({
+  sched,
+  onChanged,
+}: {
+  sched: ScheduleRow;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function run(action: () => Promise<unknown>) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await action();
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li style={S.taskItem}>
+      <div style={S.scheduleRow}>
+        <div style={S.scheduleMain}>
+          <div>
+            <span
+              style={{
+                ...S.badge,
+                background: sched.active ? "#22c55e" : "#6b7280",
+              }}
+            >
+              {sched.active ? "active" : "paused"}
+            </span>{" "}
+            <strong>{sched.name}</strong>
+          </div>
+          <div style={S.scheduleMeta}>
+            <code>{sched.cron}</code>
+            {sched.contextScope ? ` · ${sched.contextScope}` : ""}
+            {" · next "}
+            {new Date(sched.nextRunAt).toLocaleString()}
+          </div>
+          <div style={S.scheduleSpec}>{sched.spec}</div>
+        </div>
+        <div style={S.scheduleActions}>
+          <button
+            style={S.smallButton}
+            disabled={busy}
+            onClick={() => run(() => runScheduleNow(sched._id))}
+          >
+            Run now
+          </button>
+          <button
+            style={S.smallButton}
+            disabled={busy}
+            onClick={() => run(() => setScheduleActive(sched._id, !sched.active))}
+          >
+            {sched.active ? "Pause" : "Resume"}
+          </button>
+          <button
+            style={{ ...S.smallButton, color: "#ef4444" }}
+            disabled={busy}
+            onClick={() => {
+              if (confirm(`Delete schedule "${sched.name}"?`)) {
+                run(() => deleteSchedule(sched._id));
+              }
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -195,7 +448,21 @@ function Detail({ detail, scopes }: { detail: TaskDetail; scopes: string[] | nul
               </ul>
             </details>
           ) : null}
+          {task.autoSavePath && (
+            <div style={S.savedRow}>
+              <span style={S.savedTick}>⏰</span>
+              <span style={S.savedPath}>auto-saved · {task.autoSavePath}</span>
+            </div>
+          )}
+          {task.autoSaveError && (
+            <div style={S.error}>auto-save failed: {task.autoSaveError}</div>
+          )}
           <SaveToVault
+            taskId={task._id}
+            defaultScope={task.contextScope ?? ""}
+            scopes={scopes}
+          />
+          <PromoteToProject
             taskId={task._id}
             defaultScope={task.contextScope ?? ""}
             scopes={scopes}
@@ -307,6 +574,116 @@ function SaveToVault({
       <div style={S.saveActions}>
         <button onClick={save} disabled={saving} style={S.button}>
           {saving ? "Saving…" : "Save"}
+        </button>
+        <button onClick={() => setOpen(false)} style={S.cancelBtn}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PromoteToProject({
+  taskId,
+  defaultScope,
+  scopes,
+}: {
+  taskId: string;
+  defaultScope: string;
+  scopes: string[] | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState(defaultScope);
+  const [filename, setFilename] = useState("");
+  const [transformPrompt, setTransformPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<PromoteResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await promoteTask(taskId, {
+        scope,
+        filename: filename.trim(),
+        transformPrompt: transformPrompt.trim() || undefined,
+      });
+      setDone(r);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div style={S.savedRow}>
+        <span style={S.savedTick}>↗</span>
+        <span style={S.savedPath}>
+          promoted{done.transformed ? " (transformed)" : ""} · {done.relPath}
+        </span>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button style={S.saveTrigger} onClick={() => setOpen(true)}>
+        Promote to project
+      </button>
+    );
+  }
+
+  const promoteScopes = scopes?.filter((s) => s !== "") ?? [];
+
+  return (
+    <div style={S.saveBox}>
+      <label style={S.label}>
+        Target scope (canonical)
+        <select
+          value={scope}
+          onChange={(e) => setScope(e.target.value)}
+          style={S.select}
+          disabled={!scopes}
+        >
+          {!scopes && <option>loading…</option>}
+          {promoteScopes.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label style={S.label}>
+        New filename
+        <input
+          value={filename}
+          onChange={(e) => setFilename(e.target.value)}
+          placeholder="Open Question - Sub-10cm Positioning.md"
+          style={S.input}
+        />
+      </label>
+      <label style={S.label}>
+        Transform prompt (optional — leave blank for raw paste)
+        <textarea
+          value={transformPrompt}
+          onChange={(e) => setTransformPrompt(e.target.value)}
+          rows={3}
+          placeholder="Reshape as a hypothesis note. Drop conversational tone. Keep specific numbers."
+          style={S.textarea}
+        />
+      </label>
+      {err && <div style={S.error}>{err}</div>}
+      <div style={S.saveActions}>
+        <button
+          onClick={submit}
+          disabled={busy || !scope || !filename.trim()}
+          style={S.button}
+        >
+          {busy ? "Promoting…" : "Promote"}
         </button>
         <button onClick={() => setOpen(false)} style={S.cancelBtn}>
           Cancel
@@ -441,6 +818,42 @@ const S: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #2a2a2d",
     marginBottom: "0.5rem",
   },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "0.5rem",
+  },
+  smallButton: {
+    background: "transparent",
+    border: "1px solid #2a2a2d",
+    color: "#e7e7e9",
+    borderRadius: "6px",
+    padding: "0.3rem 0.6rem",
+    fontSize: "0.8rem",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  scheduleForm: {
+    background: "#16161a",
+    border: "1px solid #2a2a2d",
+    borderRadius: "8px",
+    padding: "0.75rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
+    marginBottom: "0.75rem",
+  },
+  scheduleRow: {
+    padding: "0.75rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
+  },
+  scheduleMain: { display: "flex", flexDirection: "column", gap: "0.25rem" },
+  scheduleMeta: { fontSize: "0.8rem", color: "#8a8a90" },
+  scheduleSpec: { fontSize: "0.85rem", color: "#c8c8cc" },
+  scheduleActions: { display: "flex", gap: "0.4rem", flexWrap: "wrap" },
   saveTrigger: {
     marginTop: "0.75rem",
     background: "transparent",

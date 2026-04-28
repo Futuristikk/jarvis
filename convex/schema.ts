@@ -34,6 +34,9 @@ export default defineSchema({
     contextScope: v.optional(v.string()),
     contextFiles: v.optional(v.array(v.string())),
     priorAnswersCount: v.optional(v.number()),
+    scheduleId: v.optional(v.id("schedules")),
+    autoSaveError: v.optional(v.string()),
+    autoSavePath: v.optional(v.string()),
     result: v.optional(v.string()),
     completedAt: v.optional(v.number()),
   })
@@ -74,6 +77,21 @@ export default defineSchema({
     scopes: v.array(v.string()),
     expiresAt: v.optional(v.number()),
   }).index("by_provider", ["provider"]),
+
+  schedules: defineTable({
+    name: v.string(),
+    slug: v.string(),
+    cron: v.string(),
+    type: v.literal("research"),
+    spec: v.string(),
+    contextScope: v.optional(v.string()),
+    active: v.boolean(),
+    lastRunAt: v.optional(v.number()),
+    nextRunAt: v.number(),
+    lastTaskId: v.optional(v.id("tasks")),
+  })
+    .index("by_active_nextRun", ["active", "nextRunAt"])
+    .index("by_slug", ["slug"]),
 
   coding_jobs: defineTable({
     taskId: v.id("tasks"),

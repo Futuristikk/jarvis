@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db.js";
 import { slugify, todayISO, writeVaultNote } from "../vault.js";
+import { promoteTask } from "../promote.js";
 
 export const tasks = new Hono();
 
@@ -98,6 +99,32 @@ tasks.post("/:id/save-to-vault", async (c) => {
   });
 
   return c.json(result, 201);
+});
+
+const promoteSchema = z.object({
+  scope: z.string(),
+  filename: z.string().min(1),
+  transformPrompt: z.string().optional(),
+});
+
+tasks.post("/:id/promote", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = promoteSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  try {
+    const result = await promoteTask({
+      sourceTaskId: c.req.param("id"),
+      scope: parsed.data.scope,
+      filename: parsed.data.filename,
+      transformPrompt: parsed.data.transformPrompt,
+    });
+    return c.json(result, 201);
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
 });
 
 function buildVaultBody(

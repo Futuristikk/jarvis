@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { integrations } from "./routes/integrations.js";
 import { oauth } from "./routes/oauth.js";
+import { schedules } from "./routes/schedules.js";
 import { tasks } from "./routes/tasks.js";
 import { vault } from "./routes/vault.js";
 import { startWorker } from "./worker.js";
@@ -31,6 +32,7 @@ app.route("/tasks", tasks);
 app.route("/integrations", integrations);
 app.route("/oauth", oauth);
 app.route("/vault", vault);
+app.route("/schedules", schedules);
 
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });

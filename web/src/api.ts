@@ -19,8 +19,26 @@ export type TaskRow = {
   contextScope?: string;
   contextFiles?: string[];
   priorAnswersCount?: number;
+  scheduleId?: string;
+  autoSavePath?: string;
+  autoSaveError?: string;
   result?: string;
   completedAt?: number;
+};
+
+export type ScheduleRow = {
+  _id: string;
+  _creationTime: number;
+  name: string;
+  slug: string;
+  cron: string;
+  type: "research";
+  spec: string;
+  contextScope?: string;
+  active: boolean;
+  lastRunAt?: number;
+  nextRunAt: number;
+  lastTaskId?: string;
 };
 
 export type Message = {
@@ -103,4 +121,69 @@ export async function saveTaskToVault(taskId: string, dest: VaultDest) {
     method: "POST",
     body: JSON.stringify(dest),
   });
+}
+
+export type PromoteRequest = {
+  scope: string;
+  filename: string;
+  transformPrompt?: string;
+};
+
+export type PromoteResult = {
+  absPath: string;
+  relPath: string;
+  transformed: boolean;
+};
+
+export async function promoteTask(taskId: string, req: PromoteRequest) {
+  return jsonFetch<PromoteResult>(`/tasks/${taskId}/promote`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function listSchedules() {
+  return jsonFetch<{ schedules: ScheduleRow[] }>("/schedules");
+}
+
+export async function previewCron(cron: string) {
+  const params = new URLSearchParams({ cron });
+  return jsonFetch<{ valid: boolean; next?: string; error?: string }>(
+    `/schedules/util/cron-preview?${params}`,
+  );
+}
+
+export type CreateScheduleInput = {
+  name: string;
+  cron: string;
+  spec: string;
+  contextScope?: string;
+};
+
+export async function createSchedule(input: CreateScheduleInput) {
+  return jsonFetch<{ id: string; slug: string; nextRunAt: number }>(
+    "/schedules",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function runScheduleNow(id: string) {
+  return jsonFetch<{ ok: true }>(`/schedules/${id}/run-now`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function setScheduleActive(id: string, active: boolean) {
+  return jsonFetch<{ ok: true }>(`/schedules/${id}/active`, {
+    method: "POST",
+    body: JSON.stringify({ active }),
+  });
+}
+
+export async function deleteSchedule(id: string) {
+  return jsonFetch<{ ok: true }>(`/schedules/${id}`, { method: "DELETE" });
 }

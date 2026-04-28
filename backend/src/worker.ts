@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { db, type TaskRow } from "./db.js";
-import { buildVaultContextBlock, readScopeContext } from "./vault.js";
+import { db, type TaskRow, type ScheduleRow } from "./db.js";
+import {
+  buildVaultContextBlock,
+  readScopeContext,
+  slugify,
+  todayISO,
+  writeVaultNote,
+} from "./vault.js";
+import { fireDueSchedules } from "./scheduler.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const MODEL = "claude-sonnet-4-6";
@@ -22,6 +29,7 @@ async function tick() {
   if (running) return;
   running = true;
   try {
+    await fireDueSchedules();
     const queued = await db.tasks.queued();
     const next = queued.find((t) => t.type === "research");
     if (!next) return;
@@ -48,6 +56,7 @@ async function processResearch(task: TaskRow) {
     let contextBlock = "";
     let priorAnswersBlock = "";
     let priorCount = 0;
+    let contextFilesList: string[] = [];
     if (task.contextScope) {
       const ctx = await readScopeContext(task.contextScope);
       if (ctx.files.length === 0) {
@@ -56,8 +65,8 @@ async function processResearch(task: TaskRow) {
         );
       }
       contextBlock = buildVaultContextBlock(ctx);
-      const contextFiles = ctx.files.map((f) => f.relPath);
-      await db.tasks.setContextFiles(task._id, contextFiles);
+      contextFilesList = ctx.files.map((f) => f.relPath);
+      await db.tasks.setContextFiles(task._id, contextFilesList);
 
       const priors = await db.tasks.recentDoneInScope(
         task.contextScope,
@@ -100,6 +109,10 @@ async function processResearch(task: TaskRow) {
           ? ` | tokens in=${usage.input_tokens} out=${usage.output_tokens} cache_create=${usage.cache_creation_input_tokens ?? 0} cache_read=${usage.cache_read_input_tokens ?? 0}`
           : ""),
     );
+
+    if (task.scheduleId) {
+      await autoSaveScheduledResult(task, text, citations, contextFilesList);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[worker] failed ${task._id}:`, msg);
@@ -164,6 +177,71 @@ async function callClaude(
     raw: JSON.stringify(response),
     usage: response.usage,
   };
+}
+
+async function autoSaveScheduledResult(
+  task: TaskRow,
+  summary: string,
+  citations: string[],
+  contextFiles: string[],
+) {
+  if (!task.scheduleId) return;
+  try {
+    const sched = await db.schedules.get(task.scheduleId);
+    if (!sched) {
+      throw new Error(`schedule ${task.scheduleId} not found`);
+    }
+    const result = await writeVaultNote({
+      dest: {
+        scope: sched.contextScope ?? "",
+        bucket: "Scheduled",
+        thread: sched.slug,
+      },
+      filename: `${todayISO()}.md`,
+      frontmatter: {
+        source: "jarvis",
+        jarvis_task_id: task._id,
+        jarvis_query: task.spec,
+        jarvis_scope: sched.contextScope ?? "",
+        jarvis_schedule: sched.slug,
+        jarvis_schedule_name: sched.name,
+        jarvis_context_files: contextFiles.length ? contextFiles : undefined,
+        created: todayISO(),
+        tags: [
+          "jarvis",
+          "jarvis/scheduled",
+          `jarvis/${slugify(sched.contextScope?.split("/").pop() ?? "top")}`,
+        ],
+      },
+      body: buildScheduledBody(sched, task, summary, citations),
+    });
+    await db.tasks.setAutoSaveResult({ id: task._id, path: result.relPath });
+    console.log(`[worker] auto-saved → ${result.relPath}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[worker] auto-save failed for ${task._id}:`, msg);
+    await db.tasks.setAutoSaveResult({ id: task._id, error: msg });
+  }
+}
+
+function buildScheduledBody(
+  sched: ScheduleRow,
+  _task: TaskRow,
+  summary: string,
+  citations: string[],
+): string {
+  const parts = [
+    `# ${sched.name} — ${todayISO()}`,
+    "",
+    `> Scheduled run of \`${sched.cron}\``,
+    "",
+    summary,
+  ];
+  if (citations.length > 0) {
+    parts.push("", "## Sources", "");
+    for (const c of citations) parts.push(`- ${c}`);
+  }
+  return parts.join("\n");
 }
 
 function buildPriorAnswersBlock(priors: TaskRow[]): string {
