@@ -21,7 +21,24 @@ tasks.post("/", async (c) => {
   return c.json({ id }, 201);
 });
 
+tasks.get("/", async (c) => {
+  const limit = Number(c.req.query("limit") ?? 50);
+  const rows = await db.tasks.recent(limit);
+  return c.json({ tasks: rows });
+});
+
 tasks.get("/queued", async (c) => {
   const rows = await db.tasks.queued();
   return c.json({ tasks: rows });
+});
+
+tasks.get("/:id", async (c) => {
+  const id = c.req.param("id");
+  const [task, messages, research] = await Promise.all([
+    db.tasks.get(id),
+    db.messages.byTask(id),
+    db.research.byTask(id),
+  ]);
+  if (!task) return c.json({ error: "not found" }, 404);
+  return c.json({ task, messages, research });
 });

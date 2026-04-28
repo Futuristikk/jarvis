@@ -34,6 +34,20 @@ export const queued = query({
   },
 });
 
+export const get = query({
+  args: { id: v.id("tasks") },
+  handler: async (ctx, { id }) => {
+    return await ctx.db.get(id);
+  },
+});
+
+export const recent = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    return await ctx.db.query("tasks").order("desc").take(limit ?? 50);
+  },
+});
+
 export const byProject = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {

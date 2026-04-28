@@ -6,6 +6,7 @@ import { logger } from "hono/logger";
 import { integrations } from "./routes/integrations.js";
 import { oauth } from "./routes/oauth.js";
 import { tasks } from "./routes/tasks.js";
+import { startWorker } from "./worker.js";
 
 const app = new Hono();
 
@@ -32,3 +33,5 @@ app.route("/oauth", oauth);
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
 console.log(`jarvis-backend listening on :${port}`);
+
+startWorker();

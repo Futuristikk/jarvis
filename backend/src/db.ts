@@ -1,7 +1,5 @@
 import { convex } from "./convex.js";
 
-// Untyped bridge until `npx convex dev` generates `convex/_generated/api`.
-// After generation, swap each body for `convex.mutation(api.tasks.create, args)` etc.
 const untyped = convex as unknown as {
   mutation<T = unknown>(
     name: string,
@@ -14,6 +12,24 @@ const untyped = convex as unknown as {
 };
 
 export type TaskType = "research" | "email" | "code" | "plan";
+export type TaskStatus =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type TaskRow = {
+  _id: string;
+  _creationTime: number;
+  projectId?: string;
+  type: TaskType;
+  status: TaskStatus;
+  priority: number;
+  spec: string;
+  result?: string;
+  completedAt?: number;
+};
 
 export const db = {
   tasks: {
@@ -23,7 +39,37 @@ export const db = {
       priority?: number;
       spec: string;
     }) => untyped.mutation<string>("tasks:create", args),
-    queued: () => untyped.query<unknown[]>("tasks:queued", {}),
+    queued: () => untyped.query<TaskRow[]>("tasks:queued", {}),
+    get: (id: string) => untyped.query<TaskRow | null>("tasks:get", { id }),
+    recent: (limit?: number) =>
+      untyped.query<TaskRow[]>("tasks:recent", { limit }),
+    markRunning: (id: string) =>
+      untyped.mutation<void>("tasks:markRunning", { id }),
+    markDone: (id: string, result: string) =>
+      untyped.mutation<void>("tasks:markDone", { id, result }),
+    markFailed: (id: string, error: string) =>
+      untyped.mutation<void>("tasks:markFailed", { id, error }),
+  },
+  messages: {
+    append: (args: {
+      projectId?: string;
+      taskId?: string;
+      role: "agent" | "user" | "system" | "tool";
+      content: string;
+    }) => untyped.mutation<string>("messages:append", args),
+    byTask: (taskId: string) =>
+      untyped.query<unknown[]>("messages:byTask", { taskId }),
+  },
+  research: {
+    insert: (args: {
+      taskId: string;
+      source: string;
+      summary: string;
+      raw?: string;
+      citations: string[];
+    }) => untyped.mutation<string>("research:insert", args),
+    byTask: (taskId: string) =>
+      untyped.query<unknown[]>("research:byTask", { taskId }),
   },
   projects: {
     list: () => untyped.query<unknown[]>("projects:list", {}),
