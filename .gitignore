@@ -29,3 +29,6 @@ ios/**/Package.resolved
 .idea/
 .vscode/
 *.swp
+
+# Personal notes — not for publishing
+docs/HERMES_INSPIRATION.md

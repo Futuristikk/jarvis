@@ -18,7 +18,7 @@
 ### TS backend (`backend/`)
 - TypeScript service deployed on Railway
 - Single centralized orchestrator — one service instead of many single-purpose runners
-- Holds a GitHub Personal Access Token (fine-grained) scoped to Adam's side-project repos
+- Holds a GitHub Personal Access Token (fine-grained) scoped to your side-project repos
 - Spins up Pi-Mono coding agents as jobs (subprocess / container) under the same service
 - Owns Google OAuth token refresh and Gmail/Calendar calls
 - Calls Claude API + web search for research
@@ -33,10 +33,10 @@
 ### External services
 - **OpenAI Realtime** — client-side WebRTC (browser today, Swift later). Backend mints ephemeral tokens and hydrates the system prompt with current state on session start.
 - **Google** — Gmail + Calendar, OAuth tokens stored encrypted in Convex.
-- **GitHub** — fine-grained PAT, backend reads/writes side-project repos on Adam's behalf.
+- **GitHub** — fine-grained PAT, backend reads/writes side-project repos on your behalf.
 
 ### Obsidian bridge
-- Preserve the existing vault (currently synced Syncthing + iCloud from the Hermes EC2 — sync path TBD after Hermes phase-out)
+- Preserve an existing Obsidian vault on disk; sync mechanism (Syncthing, iCloud, etc.) is left to the user
 - Backend can append notes to a queue in Convex; a thin worker flushes them into the vault
 
 ## Schema (first pass)
@@ -75,7 +75,7 @@ coding_jobs    { taskId, spec, repoTarget, status, logs, startedAt, finishedAt }
 
 ## Open questions
 
-- **Obsidian sync path** once Hermes EC2 is gone — keep a minimal sync node, or point Syncthing at the Mac / a small DO droplet?
+- **Obsidian sync path** — Syncthing, iCloud, or a small VPS — left to the user.
 - **Live updates transport** — WebSocket (persistent) vs SSE (simpler, one-way). Voice sessions may push toward WS.
 - **Scheduling split** — Convex scheduled functions for light cron-style checks vs the backend running its own worker loop. Default: Convex for cron, backend for anything that needs >5min or streaming.
 - **Pi-Mono job isolation** — subprocess per job is simplest; containers are safer but add ops. Start with subprocess, revisit if it bites.
