@@ -1,7 +1,7 @@
 import { CronExpressionParser } from "cron-parser";
 import { db, type ScheduleRow } from "./db.js";
 
-const TZ = "Europe/Madrid";
+const TZ = process.env.SCHEDULER_TZ ?? "UTC";
 
 export function nextFire(cron: string, after: Date = new Date()): Date {
   const it = CronExpressionParser.parse(cron, { currentDate: after, tz: TZ });

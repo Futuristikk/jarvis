@@ -5,6 +5,7 @@ import {
   deleteSchedule,
   getTask,
   listSchedules,
+  listScopeFiles,
   listTasks,
   listVaultScopes,
   previewCron,
@@ -12,6 +13,7 @@ import {
   runScheduleNow,
   saveTaskToVault,
   setScheduleActive,
+  type PromoteMode,
   type PromoteResult,
   type ScheduleRow,
   type TaskDetail,
@@ -168,12 +170,27 @@ export default function App() {
         </ul>
       </section>
 
-      <SchedulesSection scopes={scopes} />
+      <SchedulesSection
+        scopes={scopes}
+        tasks={tasks}
+        onOpenTask={(id) => {
+          setOpenId(id);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      />
     </div>
   );
 }
 
-function SchedulesSection({ scopes }: { scopes: string[] | null }) {
+function SchedulesSection({
+  scopes,
+  tasks,
+  onOpenTask,
+}: {
+  scopes: string[] | null;
+  tasks: TaskRow[];
+  onOpenTask: (id: string) => void;
+}) {
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -214,7 +231,17 @@ function SchedulesSection({ scopes }: { scopes: string[] | null }) {
       )}
       <ul style={S.list}>
         {schedules.map((s) => (
-          <ScheduleItem key={s._id} sched={s} onChanged={refresh} />
+          <ScheduleItem
+            key={s._id}
+            sched={s}
+            latestTask={
+              s.lastTaskId
+                ? tasks.find((t) => t._id === s.lastTaskId)
+                : undefined
+            }
+            onChanged={refresh}
+            onOpenTask={onOpenTask}
+          />
         ))}
       </ul>
     </section>
@@ -282,13 +309,13 @@ function ScheduleForm({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Saildock weekly news"
+          placeholder="e.g. weekly research digest"
           style={S.input}
           required
         />
       </label>
       <label style={S.label}>
-        Cron (Europe/Madrid)
+        Cron (server timezone)
         <input
           value={cron}
           onChange={(e) => setCron(e.target.value)}
@@ -303,7 +330,7 @@ function ScheduleForm({
         <textarea
           value={spec}
           onChange={(e) => setSpec(e.target.value)}
-          placeholder="What new self-docking research came out this week?"
+          placeholder="What new research came out this week on the topic?"
           rows={3}
           style={S.textarea}
           required
@@ -339,10 +366,14 @@ function ScheduleForm({
 
 function ScheduleItem({
   sched,
+  latestTask,
   onChanged,
+  onOpenTask,
 }: {
   sched: ScheduleRow;
+  latestTask?: TaskRow;
   onChanged: () => void;
+  onOpenTask: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -379,8 +410,40 @@ function ScheduleItem({
             {new Date(sched.nextRunAt).toLocaleString()}
           </div>
           <div style={S.scheduleSpec}>{sched.spec}</div>
+          {sched.lastRunAt && (
+            <div style={S.scheduleLatest}>
+              <div>
+                last run: {new Date(sched.lastRunAt).toLocaleString()}
+                {latestTask ? ` · ` : ""}
+                {latestTask && <StatusBadge status={latestTask.status} />}
+              </div>
+              {latestTask?.autoSavePath && (
+                <div style={S.scheduleSaved}>
+                  saved → <code>{latestTask.autoSavePath}</code>
+                </div>
+              )}
+              {latestTask?.autoSaveError && (
+                <div style={S.error}>
+                  auto-save failed: {latestTask.autoSaveError}
+                </div>
+              )}
+            </div>
+          )}
+          {!sched.lastRunAt && (
+            <div style={S.scheduleLatest}>
+              <em style={S.muted}>not run yet</em>
+            </div>
+          )}
         </div>
         <div style={S.scheduleActions}>
+          {sched.lastTaskId && (
+            <button
+              style={S.smallButton}
+              onClick={() => onOpenTask(sched.lastTaskId!)}
+            >
+              View latest
+            </button>
+          )}
           <button
             style={S.smallButton}
             disabled={busy}
@@ -593,23 +656,49 @@ function PromoteToProject({
   scopes: string[] | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState(defaultScope);
+  const [mode, setMode] = useState<PromoteMode>("create");
+  const [scope, setScope] = useState(defaultScope || "");
   const [filename, setFilename] = useState("");
+  const [targetPath, setTargetPath] = useState("");
   const [transformPrompt, setTransformPrompt] = useState("");
+  const [files, setFiles] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<PromoteResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mode === "create" || !scope) {
+      setFiles(null);
+      return;
+    }
+    let cancelled = false;
+    listScopeFiles(scope)
+      .then((r) => !cancelled && setFiles(r.files))
+      .catch((e) => !cancelled && setErr((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, scope]);
 
   async function submit() {
     if (busy) return;
     setBusy(true);
     setErr(null);
     try {
-      const r = await promoteTask(taskId, {
-        scope,
-        filename: filename.trim(),
-        transformPrompt: transformPrompt.trim() || undefined,
-      });
+      const req =
+        mode === "create"
+          ? {
+              mode: "create" as const,
+              scope,
+              filename: filename.trim(),
+              transformPrompt: transformPrompt.trim() || undefined,
+            }
+          : {
+              mode,
+              targetPath: targetPath.trim(),
+              transformPrompt: transformPrompt.trim() || undefined,
+            };
+      const r = await promoteTask(taskId, req);
       setDone(r);
     } catch (e) {
       setErr((e as Error).message);
@@ -623,7 +712,8 @@ function PromoteToProject({
       <div style={S.savedRow}>
         <span style={S.savedTick}>↗</span>
         <span style={S.savedPath}>
-          promoted{done.transformed ? " (transformed)" : ""} · {done.relPath}
+          promoted ({done.mode}
+          {done.transformed ? ", transformed" : ""}) · {done.relPath}
         </span>
       </div>
     );
@@ -638,51 +728,136 @@ function PromoteToProject({
   }
 
   const promoteScopes = scopes?.filter((s) => s !== "") ?? [];
+  const submitDisabled =
+    busy ||
+    (mode === "create" ? !scope || !filename.trim() : !targetPath.trim());
 
   return (
     <div style={S.saveBox}>
+      <div style={S.modeRow}>
+        {(["create", "append", "merge"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            style={{
+              ...S.modeButton,
+              background: mode === m ? "#ffb547" : "transparent",
+              color: mode === m ? "#0b0b0c" : "#e7e7e9",
+            }}
+          >
+            {m === "create"
+              ? "Create new"
+              : m === "append"
+                ? "Append"
+                : "Merge"}
+          </button>
+        ))}
+      </div>
+      <p style={S.modeHelp}>
+        {mode === "create" && "Write a new canonical file."}
+        {mode === "append" &&
+          "Add a dated section at the bottom of an existing file."}
+        {mode === "merge" &&
+          "Claude integrates this content into an existing file in place. Atomic write."}
+      </p>
+
+      {mode === "create" ? (
+        <>
+          <label style={S.label}>
+            Target scope
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              style={S.select}
+              disabled={!scopes}
+            >
+              {!scopes && <option>loading…</option>}
+              {promoteScopes.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={S.label}>
+            New filename
+            <input
+              value={filename}
+              onChange={(e) => setFilename(e.target.value)}
+              placeholder="Open Question - my topic.md"
+              style={S.input}
+            />
+          </label>
+        </>
+      ) : (
+        <>
+          <label style={S.label}>
+            Scope
+            <select
+              value={scope}
+              onChange={(e) => {
+                setScope(e.target.value);
+                setTargetPath("");
+              }}
+              style={S.select}
+              disabled={!scopes}
+            >
+              <option value="">(select scope)</option>
+              {promoteScopes.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={S.label}>
+            Target file
+            <select
+              value={targetPath}
+              onChange={(e) => setTargetPath(e.target.value)}
+              style={S.select}
+              disabled={!files || files.length === 0}
+            >
+              {!scope && <option value="">(pick scope first)</option>}
+              {scope && !files && <option value="">loading…</option>}
+              {files?.length === 0 && (
+                <option value="">(no canonical files in scope)</option>
+              )}
+              {files && files.length > 0 && (
+                <>
+                  <option value="">(pick a file)</option>
+                  {files.map((f) => (
+                    <option key={f} value={f}>
+                      {f.replace(scope + "/", "")}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </label>
+        </>
+      )}
+
       <label style={S.label}>
-        Target scope (canonical)
-        <select
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          style={S.select}
-          disabled={!scopes}
-        >
-          {!scopes && <option>loading…</option>}
-          {promoteScopes.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label style={S.label}>
-        New filename
-        <input
-          value={filename}
-          onChange={(e) => setFilename(e.target.value)}
-          placeholder="Open Question - Sub-10cm Positioning.md"
-          style={S.input}
-        />
-      </label>
-      <label style={S.label}>
-        Transform prompt (optional — leave blank for raw paste)
+        {mode === "merge"
+          ? "Integration prompt (optional)"
+          : "Transform prompt (optional — blank = raw paste)"}
         <textarea
           value={transformPrompt}
           onChange={(e) => setTransformPrompt(e.target.value)}
           rows={3}
-          placeholder="Reshape as a hypothesis note. Drop conversational tone. Keep specific numbers."
+          placeholder={
+            mode === "merge"
+              ? "e.g. Add as a new subsection under the existing competitive landscape note."
+              : "e.g. Reshape as a hypothesis note. Keep specific numbers."
+          }
           style={S.textarea}
         />
       </label>
       {err && <div style={S.error}>{err}</div>}
       <div style={S.saveActions}>
-        <button
-          onClick={submit}
-          disabled={busy || !scope || !filename.trim()}
-          style={S.button}
-        >
+        <button onClick={submit} disabled={submitDisabled} style={S.button}>
           {busy ? "Promoting…" : "Promote"}
         </button>
         <button onClick={() => setOpen(false)} style={S.cancelBtn}>
@@ -854,6 +1029,36 @@ const S: Record<string, React.CSSProperties> = {
   scheduleMeta: { fontSize: "0.8rem", color: "#8a8a90" },
   scheduleSpec: { fontSize: "0.85rem", color: "#c8c8cc" },
   scheduleActions: { display: "flex", gap: "0.4rem", flexWrap: "wrap" },
+  scheduleLatest: {
+    fontSize: "0.8rem",
+    color: "#8a8a90",
+    paddingTop: "0.25rem",
+    borderTop: "1px dashed #2a2a2d",
+    marginTop: "0.25rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.2rem",
+  },
+  scheduleSaved: {
+    fontSize: "0.75rem",
+    color: "#22c55e",
+    wordBreak: "break-all",
+  },
+  modeRow: { display: "flex", gap: "0.25rem" },
+  modeButton: {
+    flex: 1,
+    border: "1px solid #2a2a2d",
+    borderRadius: "6px",
+    padding: "0.4rem 0.5rem",
+    fontSize: "0.85rem",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  modeHelp: {
+    fontSize: "0.75rem",
+    color: "#8a8a90",
+    margin: "0 0 0.25rem 0",
+  },
   saveTrigger: {
     marginTop: "0.75rem",
     background: "transparent",

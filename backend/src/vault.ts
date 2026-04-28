@@ -205,6 +205,14 @@ export function buildVaultContextBlock(ctx: VaultContext): string {
   return parts.join("\n");
 }
 
+export async function listScopeFiles(scope: string): Promise<string[]> {
+  if (!scope) return [];
+  const scopeAbs = path.join(ROOT_RESOLVED, scope);
+  ensureWithinVault(scopeAbs);
+  const absPaths = await walkMarkdown(scopeAbs);
+  return absPaths.map((abs) => path.relative(ROOT_RESOLVED, abs));
+}
+
 export async function listScopes(): Promise<string[]> {
   const scopes: string[] = [""];
   for (const top of ["Projects", "Knowledge"]) {

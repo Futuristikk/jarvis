@@ -123,15 +123,25 @@ export async function saveTaskToVault(taskId: string, dest: VaultDest) {
   });
 }
 
-export type PromoteRequest = {
-  scope: string;
-  filename: string;
-  transformPrompt?: string;
-};
+export type PromoteMode = "create" | "append" | "merge";
+
+export type PromoteRequest =
+  | {
+      mode: "create";
+      scope: string;
+      filename: string;
+      transformPrompt?: string;
+    }
+  | {
+      mode: "append" | "merge";
+      targetPath: string;
+      transformPrompt?: string;
+    };
 
 export type PromoteResult = {
   absPath: string;
   relPath: string;
+  mode: PromoteMode;
   transformed: boolean;
 };
 
@@ -140,6 +150,11 @@ export async function promoteTask(taskId: string, req: PromoteRequest) {
     method: "POST",
     body: JSON.stringify(req),
   });
+}
+
+export async function listScopeFiles(scope: string) {
+  const params = new URLSearchParams({ scope });
+  return jsonFetch<{ files: string[] }>(`/vault/scope-files?${params}`);
 }
 
 export async function listSchedules() {

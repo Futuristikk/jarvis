@@ -101,23 +101,46 @@ tasks.post("/:id/save-to-vault", async (c) => {
   return c.json(result, 201);
 });
 
-const promoteSchema = z.object({
-  scope: z.string(),
-  filename: z.string().min(1),
-  transformPrompt: z.string().optional(),
-});
+const promoteSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("create"),
+    scope: z.string(),
+    filename: z.string().min(1),
+    transformPrompt: z.string().optional(),
+  }),
+  z.object({
+    mode: z.literal("append"),
+    targetPath: z.string().min(1),
+    transformPrompt: z.string().optional(),
+  }),
+  z.object({
+    mode: z.literal("merge"),
+    targetPath: z.string().min(1),
+    transformPrompt: z.string().optional(),
+  }),
+]);
 
 tasks.post("/:id/promote", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = promoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const id = c.req.param("id");
   try {
-    const result = await promoteTask({
-      sourceTaskId: c.req.param("id"),
-      scope: parsed.data.scope,
-      filename: parsed.data.filename,
-      transformPrompt: parsed.data.transformPrompt,
-    });
+    const result =
+      parsed.data.mode === "create"
+        ? await promoteTask({
+            mode: "create",
+            sourceTaskId: id,
+            scope: parsed.data.scope,
+            filename: parsed.data.filename,
+            transformPrompt: parsed.data.transformPrompt,
+          })
+        : await promoteTask({
+            mode: parsed.data.mode,
+            sourceTaskId: id,
+            targetPath: parsed.data.targetPath,
+            transformPrompt: parsed.data.transformPrompt,
+          });
     return c.json(result, 201);
   } catch (err) {
     return c.json(
