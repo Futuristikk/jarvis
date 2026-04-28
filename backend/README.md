@@ -1,6 +1,6 @@
 # jarvis-backend
 
-Centralized orchestrator — Hono on Railway, Convex data layer, Pi-Mono coding agents spun up as local jobs.
+Centralized orchestrator — Hono on Railway, Convex data layer, research worker, scheduler, vault writer, integrations.
 
 ## Run
 
@@ -38,7 +38,6 @@ src/
 ## Next
 
 - Swap `"tasks:create" as never` for typed `api.tasks.create` once `convex/_generated/api` exists
-- Add WS/SSE endpoint for iOS live updates
-- Google OAuth callback + token storage
-- Pi-Mono job runner (subprocess-per-job)
+- Add WS/SSE endpoint for live updates
+- Voice session: ephemeral Realtime token + system-prompt hydration
 - Worker loop that pulls queued tasks and dispatches by type

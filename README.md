@@ -6,12 +6,13 @@ Personal AI agent. Vite + React PWA front end, TypeScript backend on Railway, Co
 
 Async operations center. Kick off tasks from phone, live life, come back to results.
 
-- **Projects & tasks** — start a side project, add research questions, it works them in the background
+- **Projects & tasks** — start a thread, add research questions, it works them in the background
 - **Research agent** — Claude API + web search, stores summaries and sources
-- **Coding agents** — backend holds a GitHub PAT and spins up Pi-Mono agents against your side-project repos
-- **Gmail + Calendar** — read, draft, schedule
+- **Scheduled research** — cron-style schedules with timezone-aware previews, auto-save to the vault
+- **Language tutor** — leveled dialogues, word-by-word playback, vocab capture (Spanish first)
 - **Voice** — OpenAI Realtime over WebRTC from the browser, system prompt hydrated from current state
-- **Obsidian bridge** — continue writing durable notes to the existing vault
+- **Gmail + Calendar** — read, draft, schedule
+- **Obsidian bridge** — read and write a synced vault on disk; the PWA browses scopes and renders markdown
 
 ## Architecture
 
@@ -20,9 +21,9 @@ Async operations center. Kick off tasks from phone, live life, come back to resu
 │  Web PWA   │ ────────────────► │  TS backend         │
 │ (Vite + R) │ ◄── WS / SSE ──── │  (Railway)          │
 └─────┬──────┘                   │                     │
-      │ WebRTC                   │  orchestrator       │
-      │                          │  GitHub PAT         │
-      ▼                          │  Pi-Mono spin-up    │
+      │ WebRTC                   │  research worker    │
+      │                          │  scheduler          │
+      ▼                          │  vault read / write │
 ┌────────────┐                   │  Google OAuth       │
 │  OpenAI    │                   │  Claude / search    │
 │  Realtime  │                   └──────────┬──────────┘
@@ -32,9 +33,18 @@ Async operations center. Kick off tasks from phone, live life, come back to resu
                                   │  Convex             │
                                   │  DB + scheduled fns │
                                   └─────────────────────┘
+
+         ┌─────────────────────┐
+         │  Obsidian vault     │  ← synced on Mac
+         │  (filesystem path)  │     (Syncthing / iCloud)
+         └─────────────────────┘
+                  ▲
+                  │ vault reader / writer
+                  │
+            (TS backend)
 ```
 
-PWA installs to the home screen on iOS / Android. One backend service instead of a fleet of single-purpose runners. Pi-Mono coding agents run as jobs under the same Railway service.
+PWA installs to the home screen on iOS / Android. One centralized backend service. The Obsidian vault lives on your Mac's filesystem; the backend reads it (for the PWA browser) and writes to it (research auto-save, promote-to-canonical), and your existing sync mechanism propagates changes to other devices.
 
 A native Swift iOS client is kept as a future option — same backend, same protocols, lift-and-shift once an Apple Developer account is in play.
 
@@ -44,7 +54,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for schema and data flows.
 
 ```
 web/       — Vite + React PWA (primary client)
-backend/   — TypeScript service (Railway) — orchestrator, Pi-Mono runner, integrations
+backend/   — TypeScript service (Railway) — research worker, scheduler, vault reader/writer, integrations
 convex/    — Convex schema + functions (data layer)
 ios/       — reserved for a future Swift client (TestFlight only, no code yet)
 docs/      — architecture, decisions, notes
@@ -61,7 +71,7 @@ Working slices, running locally. The pieces that are wired end-to-end today:
 - **Google OAuth** — token exchange + refresh + encrypted storage in Convex; Gmail and Calendar surfaces ready to read
 - **PWA shell** — Vite + React, installable, talks to the backend over HTTP
 
-In progress: voice (OpenAI Realtime over WebRTC), Pi-Mono coding-agent runner, Railway deploy.
+In progress: voice (OpenAI Realtime over WebRTC), expanding the language-tutor surface beyond Spanish, Railway deploy.
 
 ## License
 
