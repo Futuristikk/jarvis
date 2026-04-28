@@ -27,6 +27,9 @@ export type TaskRow = {
   status: TaskStatus;
   priority: number;
   spec: string;
+  contextScope?: string;
+  contextFiles?: string[];
+  priorAnswersCount?: number;
   result?: string;
   completedAt?: number;
 };
@@ -38,7 +41,18 @@ export const db = {
       type: TaskType;
       priority?: number;
       spec: string;
+      contextScope?: string;
     }) => untyped.mutation<string>("tasks:create", args),
+    setContextFiles: (id: string, files: string[]) =>
+      untyped.mutation<void>("tasks:setContextFiles", { id, files }),
+    setPriorAnswersCount: (id: string, count: number) =>
+      untyped.mutation<void>("tasks:setPriorAnswersCount", { id, count }),
+    recentDoneInScope: (scope: string, limit: number, excludeId?: string) =>
+      untyped.query<TaskRow[]>("tasks:recentDoneInScope", {
+        scope,
+        limit,
+        excludeId,
+      }),
     queued: () => untyped.query<TaskRow[]>("tasks:queued", {}),
     get: (id: string) => untyped.query<TaskRow | null>("tasks:get", { id }),
     recent: (limit?: number) =>

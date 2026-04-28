@@ -31,11 +31,15 @@ export default defineSchema({
     ),
     priority: v.number(),
     spec: v.string(),
+    contextScope: v.optional(v.string()),
+    contextFiles: v.optional(v.array(v.string())),
+    priorAnswersCount: v.optional(v.number()),
     result: v.optional(v.string()),
     completedAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_contextScope", ["contextScope"]),
 
   research: defineTable({
     taskId: v.id("tasks"),

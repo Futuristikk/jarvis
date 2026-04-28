@@ -1,9 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db, type TaskRow } from "./db.js";
+import { buildVaultContextBlock, readScopeContext } from "./vault.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const MODEL = "claude-sonnet-4-6";
 const MAX_SEARCHES = 5;
+const PRIOR_ANSWERS_LIMIT = 3;
+const BASE_SYSTEM =
+  "You are Jarvis, a personal research agent. Answer the user's question using web_search when fresh or specific information is needed. Be concise. End with a 'Sources:' section listing the URLs you cited.";
 
 const anthropic = new Anthropic();
 
@@ -30,7 +34,9 @@ async function tick() {
 }
 
 async function processResearch(task: TaskRow) {
-  console.log(`[worker] picking up ${task._id} — ${task.spec.slice(0, 60)}`);
+  console.log(
+    `[worker] picking up ${task._id}${task.contextScope ? ` [scope=${task.contextScope}]` : ""} — ${task.spec.slice(0, 60)}`,
+  );
   await db.tasks.markRunning(task._id);
   await db.messages.append({
     taskId: task._id,
@@ -39,7 +45,41 @@ async function processResearch(task: TaskRow) {
   });
 
   try {
-    const { text, citations, raw } = await callClaude(task.spec);
+    let contextBlock = "";
+    let priorAnswersBlock = "";
+    let priorCount = 0;
+    if (task.contextScope) {
+      const ctx = await readScopeContext(task.contextScope);
+      if (ctx.files.length === 0) {
+        throw new Error(
+          `scope "${task.contextScope}" exists but contains no readable canonical files`,
+        );
+      }
+      contextBlock = buildVaultContextBlock(ctx);
+      const contextFiles = ctx.files.map((f) => f.relPath);
+      await db.tasks.setContextFiles(task._id, contextFiles);
+
+      const priors = await db.tasks.recentDoneInScope(
+        task.contextScope,
+        PRIOR_ANSWERS_LIMIT,
+        task._id,
+      );
+      if (priors.length > 0) {
+        priorAnswersBlock = buildPriorAnswersBlock(priors);
+        priorCount = priors.length;
+        await db.tasks.setPriorAnswersCount(task._id, priorCount);
+      }
+
+      console.log(
+        `[worker] vault context: ${ctx.files.length} files, ${ctx.totalBytes} bytes; priors: ${priorCount}`,
+      );
+    }
+
+    const { text, citations, raw, usage } = await callClaude(
+      task.spec,
+      contextBlock,
+      priorAnswersBlock,
+    );
 
     await db.research.insert({
       taskId: task._id,
@@ -55,7 +95,10 @@ async function processResearch(task: TaskRow) {
     });
     await db.tasks.markDone(task._id, text);
     console.log(
-      `[worker] done ${task._id} — ${citations.length} citations, ${text.length} chars`,
+      `[worker] done ${task._id} — ${citations.length} citations, ${text.length} chars` +
+        (usage
+          ? ` | tokens in=${usage.input_tokens} out=${usage.output_tokens} cache_create=${usage.cache_creation_input_tokens ?? 0} cache_read=${usage.cache_read_input_tokens ?? 0}`
+          : ""),
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -64,12 +107,30 @@ async function processResearch(task: TaskRow) {
   }
 }
 
-async function callClaude(question: string) {
+async function callClaude(
+  question: string,
+  contextBlock: string,
+  priorAnswersBlock: string,
+) {
+  const systemBlocks: Anthropic.TextBlockParam[] = [
+    { type: "text", text: BASE_SYSTEM },
+  ];
+  if (contextBlock) {
+    systemBlocks.push({
+      type: "text",
+      text: contextBlock,
+      cache_control: { type: "ephemeral" },
+    });
+  }
+
+  const userContent = priorAnswersBlock
+    ? `${priorAnswersBlock}\n\n# Question\n\n${question}`
+    : question;
+
   const response = await anthropic.messages.create({
     model: MODEL,
     max_tokens: 4096,
-    system:
-      "You are Jarvis, a personal research agent. Answer the user's question using web_search when fresh or specific information is needed. Be concise. End with a 'Sources:' section listing the URLs you cited.",
+    system: systemBlocks,
     tools: [
       {
         type: "web_search_20250305",
@@ -77,7 +138,7 @@ async function callClaude(question: string) {
         max_uses: MAX_SEARCHES,
       } as unknown as Anthropic.Tool,
     ],
-    messages: [{ role: "user", content: question }],
+    messages: [{ role: "user", content: userContent }],
   });
 
   const textParts: string[] = [];
@@ -101,5 +162,19 @@ async function callClaude(question: string) {
     text: textParts.join("\n").trim(),
     citations: [...citations],
     raw: JSON.stringify(response),
+    usage: response.usage,
   };
+}
+
+function buildPriorAnswersBlock(priors: TaskRow[]): string {
+  const parts = [
+    "# Prior conversation in this scope",
+    "",
+    "Earlier questions you've answered in this scope and your responses, most recent first. Treat them as conversational context — feel free to reference, refine, or update any prior answer in light of the new question.",
+    "",
+  ];
+  for (const t of priors) {
+    parts.push(`## Q: ${t.spec}`, "", t.result ?? "(no answer)", "", "---", "");
+  }
+  return parts.join("\n");
 }

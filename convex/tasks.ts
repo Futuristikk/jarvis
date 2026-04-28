@@ -12,6 +12,7 @@ export const create = mutation({
     ),
     priority: v.optional(v.number()),
     spec: v.string(),
+    contextScope: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("tasks", {
@@ -20,7 +21,41 @@ export const create = mutation({
       status: "queued",
       priority: args.priority ?? 0,
       spec: args.spec,
+      contextScope: args.contextScope,
     });
+  },
+});
+
+export const setContextFiles = mutation({
+  args: { id: v.id("tasks"), files: v.array(v.string()) },
+  handler: async (ctx, { id, files }) => {
+    await ctx.db.patch(id, { contextFiles: files });
+  },
+});
+
+export const setPriorAnswersCount = mutation({
+  args: { id: v.id("tasks"), count: v.number() },
+  handler: async (ctx, { id, count }) => {
+    await ctx.db.patch(id, { priorAnswersCount: count });
+  },
+});
+
+export const recentDoneInScope = query({
+  args: {
+    scope: v.string(),
+    limit: v.number(),
+    excludeId: v.optional(v.id("tasks")),
+  },
+  handler: async (ctx, { scope, limit, excludeId }) => {
+    const overscan = excludeId ? limit + 1 : limit;
+    const rows = await ctx.db
+      .query("tasks")
+      .withIndex("by_contextScope", (q) => q.eq("contextScope", scope))
+      .order("desc")
+      .filter((q) => q.eq(q.field("status"), "done"))
+      .take(overscan);
+    const filtered = excludeId ? rows.filter((r) => r._id !== excludeId) : rows;
+    return filtered.slice(0, limit);
   },
 });
 

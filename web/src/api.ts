@@ -16,6 +16,9 @@ export type TaskRow = {
   status: TaskStatus;
   priority: number;
   spec: string;
+  contextScope?: string;
+  contextFiles?: string[];
+  priorAnswersCount?: number;
   result?: string;
   completedAt?: number;
 };
@@ -59,10 +62,14 @@ export async function getHealth() {
   return jsonFetch<{ ok: boolean; service: string; time: string }>("/health");
 }
 
-export async function createResearchTask(question: string) {
+export async function createResearchTask(question: string, contextScope?: string) {
   return jsonFetch<{ id: string }>("/tasks", {
     method: "POST",
-    body: JSON.stringify({ type: "research", spec: question }),
+    body: JSON.stringify({
+      type: "research",
+      spec: question,
+      contextScope: contextScope || undefined,
+    }),
   });
 }
 
@@ -72,4 +79,28 @@ export async function listTasks(limit = 50) {
 
 export async function getTask(id: string) {
   return jsonFetch<TaskDetail>(`/tasks/${id}`);
+}
+
+export type VaultBucket = "Inbox" | "Scheduled" | "Threads";
+
+export type VaultDest = {
+  scope: string;
+  bucket: VaultBucket;
+  thread?: string;
+};
+
+export type VaultWriteResult = {
+  absPath: string;
+  relPath: string;
+};
+
+export async function listVaultScopes() {
+  return jsonFetch<{ scopes: string[] }>("/vault/scopes");
+}
+
+export async function saveTaskToVault(taskId: string, dest: VaultDest) {
+  return jsonFetch<VaultWriteResult>(`/tasks/${taskId}/save-to-vault`, {
+    method: "POST",
+    body: JSON.stringify(dest),
+  });
 }
