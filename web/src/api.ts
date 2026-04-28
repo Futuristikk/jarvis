@@ -157,6 +157,29 @@ export async function listScopeFiles(scope: string) {
   return jsonFetch<{ files: string[] }>(`/vault/scope-files?${params}`);
 }
 
+export type VaultFileMeta = {
+  relPath: string;
+  mtime: number;
+  bytes: number;
+};
+
+export async function listScopeFilesWithMeta(scope: string) {
+  const params = new URLSearchParams({ scope, meta: "1" });
+  return jsonFetch<{ files: VaultFileMeta[] }>(`/vault/scope-files?${params}`);
+}
+
+export type VaultFile = {
+  relPath: string;
+  frontmatter: Record<string, string>;
+  body: string;
+  mtime: number;
+};
+
+export async function getVaultFile(relPath: string) {
+  const params = new URLSearchParams({ path: relPath });
+  return jsonFetch<VaultFile>(`/vault/file?${params}`);
+}
+
 export async function listSchedules() {
   return jsonFetch<{ schedules: ScheduleRow[] }>("/schedules");
 }

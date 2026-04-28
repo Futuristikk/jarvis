@@ -205,6 +205,63 @@ export function buildVaultContextBlock(ctx: VaultContext): string {
   return parts.join("\n");
 }
 
+export type VaultFile = {
+  relPath: string;
+  frontmatter: Record<string, string>;
+  body: string;
+  mtime: number;
+};
+
+function parseFrontmatter(content: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
+  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { frontmatter: {}, body: content };
+  const yaml = m[1];
+  const fm: Record<string, string> = {};
+  for (const line of yaml.split(/\r?\n/)) {
+    const kv = line.match(/^([a-zA-Z0-9_.-]+):\s*(.*)$/);
+    if (kv) fm[kv[1]] = kv[2].trim();
+  }
+  return { frontmatter: fm, body: content.slice(m[0].length) };
+}
+
+export async function readVaultFile(relPath: string): Promise<VaultFile> {
+  if (!relPath || relPath.includes("..")) {
+    throw new Error("invalid path");
+  }
+  const abs = path.join(ROOT_RESOLVED, relPath);
+  ensureWithinVault(abs);
+  if (!abs.endsWith(".md")) throw new Error("only .md files supported");
+  const [content, stat] = await Promise.all([
+    fs.readFile(abs, "utf8"),
+    fs.stat(abs),
+  ]);
+  const { frontmatter, body } = parseFrontmatter(content);
+  return { relPath, frontmatter, body, mtime: stat.mtimeMs };
+}
+
+export async function listScopeFilesWithMeta(
+  scope: string,
+): Promise<Array<{ relPath: string; mtime: number; bytes: number }>> {
+  if (!scope) return [];
+  const scopeAbs = path.join(ROOT_RESOLVED, scope);
+  ensureWithinVault(scopeAbs);
+  const absPaths = await walkMarkdown(scopeAbs);
+  const out: Array<{ relPath: string; mtime: number; bytes: number }> = [];
+  for (const abs of absPaths) {
+    const stat = await fs.stat(abs);
+    out.push({
+      relPath: path.relative(ROOT_RESOLVED, abs),
+      mtime: stat.mtimeMs,
+      bytes: stat.size,
+    });
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
 export async function listScopeFiles(scope: string): Promise<string[]> {
   if (!scope) return [];
   const scopeAbs = path.join(ROOT_RESOLVED, scope);

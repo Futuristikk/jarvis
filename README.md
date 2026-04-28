@@ -52,7 +52,16 @@ docs/      — architecture, decisions, notes
 
 ## Status
 
-Scaffolding. Railway backend not yet provisioned. Web shell wired to backend `/health`.
+Working slices, running locally. The pieces that are wired end-to-end today:
+
+- **Research worker** — submit a question from the PWA, backend dispatches Claude + web search, results stream back with citations, persisted in Convex
+- **Scheduled research** — cron-style schedules with timezone-aware next-run preview, run-now / pause / resume, latest-task readout per schedule
+- **Vault writer** — save task output to a synced Obsidian vault under scope/Inbox, scope/Threads/{slug}, or scope/Scheduled/{slug}
+- **Promote to canonical** — turn a research result into a project file via create / append / merge modes, with optional Claude transform prompt
+- **Google OAuth** — token exchange + refresh + encrypted storage in Convex; Gmail and Calendar surfaces ready to read
+- **PWA shell** — Vite + React, installable, talks to the backend over HTTP
+
+In progress: voice (OpenAI Realtime over WebRTC), Pi-Mono coding-agent runner, Railway deploy.
 
 ## License
 
