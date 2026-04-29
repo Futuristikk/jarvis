@@ -225,3 +225,16 @@ export async function setScheduleActive(id: string, active: boolean) {
 export async function deleteSchedule(id: string) {
   return jsonFetch<{ ok: true }>(`/schedules/${id}`, { method: "DELETE" });
 }
+
+export type RealtimeToken = {
+  token: string;
+  expiresAt: number;
+  model: string;
+};
+
+export async function getRealtimeToken() {
+  return jsonFetch<RealtimeToken>("/voice/realtime-token", {
+    method: "POST",
+    body: "{}",
+  });
+}

@@ -8,6 +8,7 @@ import { oauth } from "./routes/oauth.js";
 import { schedules } from "./routes/schedules.js";
 import { tasks } from "./routes/tasks.js";
 import { vault } from "./routes/vault.js";
+import { voice } from "./routes/voice.js";
 import { startWorker } from "./worker.js";
 
 const app = new Hono();
@@ -38,6 +39,7 @@ app.route("/integrations", integrations);
 app.route("/oauth", oauth);
 app.route("/vault", vault);
 app.route("/schedules", schedules);
+app.route("/voice", voice);
 
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
