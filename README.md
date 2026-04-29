@@ -17,22 +17,22 @@ Async operations center. Kick off tasks from phone, live life, come back to resu
 ## Architecture
 
 ```
-┌────────────┐       HTTPS       ┌─────────────────────┐    vault r/w     ┌─────────────────────┐
-│  Web PWA   │ ────────────────► │  TS backend         │ ───────────────► │  Obsidian vault     │
-│ (Vite + R) │ ◄── WS / SSE ──── │  (Railway)          │ ◄─────────────── │  (filesystem path)  │
-└─────┬──────┘                   │                     │                  │  synced on Mac      │
-      │ WebRTC                   │  research worker    │                  │  (Syncthing/iCloud) │
-      │                          │  scheduler          │                  └─────────────────────┘
-      ▼                          │  vault read / write │
-┌────────────┐                   │  Google OAuth       │
-│  OpenAI    │                   │  Claude / search    │
-│  Realtime  │                   └──────────┬──────────┘
-└────────────┘                              │
-                                            ▼
-                                  ┌─────────────────────┐
-                                  │  Convex             │
-                                  │  DB + scheduled fns │
-                                  └─────────────────────┘
+┌────────────┐    HTTPS    ┌─────────────────────┐ vault r/w ┌─────────────────────┐
+│  Web PWA   │ ──────────► │  TS backend         │ ────────► │  Obsidian vault     │
+│ (Vite + R) │ ◄─ WS/SSE ─ │  (Railway)          │ ◄──────── │  (filesystem path)  │
+└─────┬──────┘             │                     │           │  synced on Mac      │
+      │ WebRTC             │  research worker    │           │  (Syncthing/iCloud) │
+      │                    │  scheduler          │           └─────────────────────┘
+      ▼                    │  vault read / write │
+┌────────────┐             │  Google OAuth       │
+│  OpenAI    │             │  Claude / search    │
+│  Realtime  │             └──────────┬──────────┘
+└────────────┘                        │
+                                      ▼
+                            ┌─────────────────────┐
+                            │  Convex             │
+                            │  DB + scheduled fns │
+                            └─────────────────────┘
 ```
 
 PWA installs to the home screen on iOS / Android. One centralized backend service. The Obsidian vault lives on your Mac's filesystem; the backend reads it (for the PWA browser) and writes to it (research auto-save, promote-to-canonical), and your existing sync mechanism propagates changes to other devices.
