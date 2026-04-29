@@ -1,4 +1,4 @@
-import { getRealtimeToken } from "../api";
+import { executeVoiceTool, getRealtimeToken } from "../api";
 
 export type SessionState = "idle" | "connecting" | "listening" | "thinking" | "speaking";
 
@@ -34,6 +34,13 @@ export class RealtimeSession {
   private turns: Turn[] = [];
   private state: SessionState = "idle";
   private events: SessionEvents;
+  // Tool calls collected during a response; flushed on response.done so we
+  // never race the response state machine.
+  private pendingToolCalls: Array<{
+    callId: string;
+    name: string;
+    args: string;
+  }> = [];
 
   constructor(events: SessionEvents) {
     this.events = events;
@@ -188,8 +195,21 @@ export class RealtimeSession {
         if (text && itemId) this.replaceTurn(itemId, "agent", text, true);
         break;
       }
+      case "response.function_call_arguments.done": {
+        const callId = String(evt.call_id ?? "");
+        const name = String(evt.name ?? "");
+        const args = String(evt.arguments ?? "{}");
+        if (callId && name) this.pendingToolCalls.push({ callId, name, args });
+        break;
+      }
       case "response.done":
-        this.setState("listening");
+        if (this.pendingToolCalls.length > 0) {
+          // fire and forget — flushPendingTools sends events back through dc
+          // and triggers a new response.create when results land.
+          void this.flushPendingTools();
+        } else {
+          this.setState("listening");
+        }
         break;
       case "error": {
         const msg = evt.error?.message ?? "unknown realtime error";
@@ -199,6 +219,39 @@ export class RealtimeSession {
       default:
         break;
     }
+  }
+
+  private async flushPendingTools() {
+    if (!this.dc || this.dc.readyState !== "open") {
+      this.pendingToolCalls = [];
+      this.setState("listening");
+      return;
+    }
+    const batch = this.pendingToolCalls.splice(0);
+    // Stay in thinking while tool executes.
+    this.setState("thinking");
+    for (const call of batch) {
+      let output: string;
+      try {
+        const args = JSON.parse(call.args || "{}") as Record<string, unknown>;
+        const res = await executeVoiceTool(call.name, args);
+        output = res.output;
+      } catch (err) {
+        output = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      this.dc.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.callId,
+            output,
+          },
+        }),
+      );
+    }
+    // Ask the model to continue now that tool outputs are in scope.
+    this.dc.send(JSON.stringify({ type: "response.create" }));
   }
 
   private appendTurn(id: string, role: Turn["role"], text: string, done: boolean) {

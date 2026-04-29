@@ -238,3 +238,13 @@ export async function getRealtimeToken() {
     body: "{}",
   });
 }
+
+export async function executeVoiceTool(
+  name: string,
+  args: Record<string, unknown>,
+) {
+  return jsonFetch<{ output: string }>("/voice/tools/execute", {
+    method: "POST",
+    body: JSON.stringify({ name, args }),
+  });
+}
