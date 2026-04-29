@@ -12,8 +12,13 @@ import { startWorker } from "./worker.js";
 
 const app = new Hono();
 
+const ALLOWED_ORIGINS = [
+  "https://jarvis-web-rouge.vercel.app",
+  "http://localhost:5173",
+];
+
 app.use("*", logger());
-app.use("*", cors({ origin: "*" }));
+app.use("*", cors({ origin: ALLOWED_ORIGINS }));
 
 app.onError((err, c) => {
   console.error(err);

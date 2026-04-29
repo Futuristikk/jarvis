@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db.js";
 import { nextFire, validateCron, fireDueSchedules } from "../scheduler.js";
-import { slugify } from "../vault.js";
+import { slugify } from "../vaultClient.js";
 
 export const schedules = new Hono();
 

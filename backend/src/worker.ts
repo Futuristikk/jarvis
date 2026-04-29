@@ -6,7 +6,7 @@ import {
   slugify,
   todayISO,
   writeVaultNote,
-} from "./vault.js";
+} from "./vaultClient.js";
 import { fireDueSchedules } from "./scheduler.js";
 
 const POLL_INTERVAL_MS = 5_000;

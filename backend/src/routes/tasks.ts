@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db.js";
-import { slugify, todayISO, writeVaultNote } from "../vault.js";
+import { slugify, todayISO, writeVaultNote } from "../vaultClient.js";
 import { promoteTask } from "../promote.js";
 
 export const tasks = new Hono();

@@ -9,6 +9,9 @@
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
     "backend:typecheck": "npm --prefix backend run typecheck",
+    "mac:dev": "npm --prefix mac run dev",
+    "mac:build": "npm --prefix mac run build",
+    "mac:typecheck": "npm --prefix mac run typecheck",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "web:typecheck": "npm --prefix web run typecheck"

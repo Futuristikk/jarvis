@@ -4,7 +4,7 @@ import {
   listScopeFiles,
   listScopeFilesWithMeta,
   readVaultFile,
-} from "../vault.js";
+} from "../vaultClient.js";
 
 export const vault = new Hono();
 
@@ -15,7 +15,7 @@ vault.get("/scopes", async (c) => {
 vault.get("/scope-files", async (c) => {
   const scope = c.req.query("scope") ?? "";
   const withMeta = c.req.query("meta") === "1";
-  if (!scope) return c.json(withMeta ? { files: [] } : { files: [] });
+  if (!scope) return c.json({ files: [] });
   try {
     if (withMeta) {
       const files = await listScopeFilesWithMeta(scope);

@@ -1,13 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import path from "node:path";
-import { promises as fs } from "node:fs";
 import { db } from "./db.js";
-
-const VAULT_ROOT = process.env.VAULT_PATH;
-if (!VAULT_ROOT) {
-  throw new Error("VAULT_PATH env var is required");
-}
-const ROOT_RESOLVED = path.resolve(VAULT_ROOT);
+import { canonicalWrite, readRawFile } from "./vaultClient.js";
 
 const PROMOTE_MODEL = "claude-sonnet-4-6";
 const anthropic = new Anthropic();
@@ -42,36 +35,6 @@ export type PromoteResult = {
   transformed: boolean;
 };
 
-function ensureCanonicalRel(relPath: string): string {
-  const abs = path.resolve(ROOT_RESOLVED, relPath);
-  if (abs !== ROOT_RESOLVED && !abs.startsWith(ROOT_RESOLVED + path.sep)) {
-    throw new Error(`refuses to write outside vault: ${relPath}`);
-  }
-  const segments = relPath.split(path.sep);
-  if (segments.includes("_jarvis")) {
-    throw new Error("promote target cannot be inside _jarvis/");
-  }
-  if (segments.includes("Archived")) {
-    throw new Error("promote target cannot be inside Archived/");
-  }
-  return abs;
-}
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function atomicWrite(abs: string, content: string) {
-  const tmp = `${abs}.tmp-${Date.now()}`;
-  await fs.writeFile(tmp, content, "utf8");
-  await fs.rename(tmp, abs);
-}
-
 export async function promoteTask(
   input: PromoteInput,
 ): Promise<PromoteResult> {
@@ -100,11 +63,7 @@ async function promoteCreate(
   let filename = input.filename.trim();
   if (!filename.endsWith(".md")) filename += ".md";
 
-  const relPath = path.join(input.scope, filename);
-  const absPath = ensureCanonicalRel(relPath);
-  if (await exists(absPath)) {
-    throw new Error(`file already exists: ${relPath}`);
-  }
+  const relPath = joinPath(input.scope, filename);
 
   let body = summary;
   let transformed = false;
@@ -128,9 +87,17 @@ async function promoteCreate(
   });
 
   const final = `${fm}\n\n${body.trim()}\n`;
-  await fs.mkdir(path.dirname(absPath), { recursive: true });
-  await atomicWrite(absPath, final);
-  return { absPath, relPath, mode: "create", transformed };
+  const result = await canonicalWrite({
+    relPath,
+    content: final,
+    mode: "create",
+  });
+  return {
+    absPath: result.absPath,
+    relPath: result.relPath,
+    mode: "create",
+    transformed,
+  };
 }
 
 async function promoteAppend(
@@ -138,11 +105,6 @@ async function promoteAppend(
   taskId: string,
   summary: string,
 ): Promise<PromoteResult> {
-  const absPath = ensureCanonicalRel(input.targetPath);
-  if (!(await exists(absPath))) {
-    throw new Error(`target file does not exist: ${input.targetPath}`);
-  }
-
   let body = summary;
   let transformed = false;
   if (input.transformPrompt && input.transformPrompt.trim()) {
@@ -150,8 +112,8 @@ async function promoteAppend(
     transformed = true;
   }
 
-  const original = await fs.readFile(absPath, "utf8");
-  const { frontmatter, content } = splitFrontmatter(original);
+  const original = await readRawFile(input.targetPath);
+  const { frontmatter, content } = splitFrontmatter(original.content);
   const today = new Date().toISOString().slice(0, 10);
   const updatedFm = bumpUpdated(frontmatter, today);
 
@@ -165,10 +127,14 @@ async function promoteAppend(
   ].join("\n");
 
   const newContent = `${updatedFm}${content.trimEnd()}\n${appendBlock}`;
-  await atomicWrite(absPath, newContent);
-  return {
-    absPath,
+  const result = await canonicalWrite({
     relPath: input.targetPath,
+    content: newContent,
+    mode: "overwrite",
+  });
+  return {
+    absPath: result.absPath,
+    relPath: result.relPath,
     mode: "append",
     transformed,
   };
@@ -179,13 +145,10 @@ async function promoteMerge(
   taskId: string,
   summary: string,
 ): Promise<PromoteResult> {
-  const absPath = ensureCanonicalRel(input.targetPath);
-  if (!(await exists(absPath))) {
-    throw new Error(`target file does not exist: ${input.targetPath}`);
-  }
-
-  const original = await fs.readFile(absPath, "utf8");
-  const { frontmatter, content: originalBody } = splitFrontmatter(original);
+  const original = await readRawFile(input.targetPath);
+  const { frontmatter, content: originalBody } = splitFrontmatter(
+    original.content,
+  );
   const today = new Date().toISOString().slice(0, 10);
 
   const merged = await mergeWithClaude({
@@ -198,13 +161,22 @@ async function promoteMerge(
 
   const finalContent = ensureMergedHasFrontmatter(merged, frontmatter, today);
   const sourceFooter = `\n\n<!-- jarvis_merged_from_task: ${taskId} on ${today} -->\n`;
-  await atomicWrite(absPath, finalContent.trimEnd() + sourceFooter);
-  return {
-    absPath,
+  const result = await canonicalWrite({
     relPath: input.targetPath,
+    content: finalContent.trimEnd() + sourceFooter,
+    mode: "overwrite",
+  });
+  return {
+    absPath: result.absPath,
+    relPath: result.relPath,
     mode: "merge",
     transformed: true,
   };
+}
+
+function joinPath(scope: string, filename: string): string {
+  if (!scope) return filename;
+  return scope.endsWith("/") ? `${scope}${filename}` : `${scope}/${filename}`;
 }
 
 function splitFrontmatter(raw: string): {
@@ -237,7 +209,6 @@ function ensureMergedHasFrontmatter(
   if (merged.startsWith("---\n") && merged.indexOf("\n---", 4) !== -1) {
     return bumpUpdatedInline(merged, today);
   }
-  // model dropped frontmatter — restore from original
   const updated = bumpUpdated(originalFrontmatter, today);
   return `${updated}\n${merged.trimStart()}`;
 }
