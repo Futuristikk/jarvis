@@ -1,8 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./components/Icon";
+import { Login } from "./components/Login";
 import { VoicePage } from "./pages/VoicePage";
 import { SpanishPage } from "./pages/SpanishPage";
 import { VaultPage } from "./pages/VaultPage";
+import { getToken, onTokenChange } from "./auth";
 
 type PageId = "voice" | "spanish" | "vault";
 
@@ -20,6 +22,11 @@ const PAGES: Record<PageId, ReactNode> = {
 
 export default function App() {
   const [page, setPage] = useState<PageId>("voice");
+  const [token, setTokenState] = useState<string | null>(() => getToken());
+
+  useEffect(() => onTokenChange(setTokenState), []);
+
+  if (!token) return <Login />;
 
   return (
     <div className="app">

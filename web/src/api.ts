@@ -1,3 +1,5 @@
+import { getToken, setToken } from "./auth";
+
 const BASE =
   import.meta.env.VITE_BACKEND_URL ??
   `${window.location.protocol}//${window.location.hostname}:3000`;
@@ -65,15 +67,35 @@ export type TaskDetail = {
 };
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (token) headers["authorization"] = `Bearer ${token}`;
+
+  const r = await fetch(`${BASE}${path}`, { ...init, headers });
+  if (r.status === 401) {
+    setToken(null);
+    throw new Error("unauthorized");
+  }
   if (!r.ok) {
     const body = await r.text().catch(() => "");
     throw new Error(`${r.status} ${path}: ${body.slice(0, 200)}`);
   }
   return r.json() as Promise<T>;
+}
+
+export async function verifyPassword(password: string): Promise<boolean> {
+  const r = await fetch(`${BASE}/health`, {
+    headers: { authorization: `Bearer ${password}` },
+  });
+  if (!r.ok) return false;
+  // /health is public, so we need a real auth-required probe.
+  const r2 = await fetch(`${BASE}/vault/scopes`, {
+    headers: { authorization: `Bearer ${password}` },
+  });
+  return r2.ok;
 }
 
 export async function getHealth() {

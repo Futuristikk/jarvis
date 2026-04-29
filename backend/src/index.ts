@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { requirePassword } from "./auth.js";
 import { integrations } from "./routes/integrations.js";
 import { oauth } from "./routes/oauth.js";
 import { schedules } from "./routes/schedules.js";
@@ -20,6 +21,7 @@ const ALLOWED_ORIGINS = [
 
 app.use("*", logger());
 app.use("*", cors({ origin: ALLOWED_ORIGINS }));
+app.use("*", requirePassword);
 
 app.onError((err, c) => {
   console.error(err);
