@@ -6,25 +6,36 @@ import {
   type Turn,
 } from "../voice/realtimeSession";
 
-const STATE_LABEL: Record<SessionState, string> = {
-  idle: "Tap to talk",
-  connecting: "Connecting…",
-  listening: "Listening",
-  thinking: "Thinking",
-  speaking: "Speaking",
-};
-
 export function VoicePage() {
-  const [state, setState] = useState<SessionState>("idle");
+  const [state, setState] = useState<SessionState>("connecting");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<RealtimeSession | null>(null);
 
+  // Auto-connect when the Voice page mounts; tear down on unmount so leaving
+  // the tab fully releases the mic and the WebRTC peer connection.
   useEffect(() => {
+    let disposed = false;
+    const session = new RealtimeSession({
+      onState: (s) => {
+        if (!disposed) setState(s);
+      },
+      onTranscript: (t) => {
+        if (!disposed) setTurns(t);
+      },
+      onError: (msg) => {
+        if (!disposed) setError(msg);
+      },
+    });
+    sessionRef.current = session;
+    session.start().catch(() => {
+      sessionRef.current = null;
+    });
     return () => {
+      disposed = true;
       sessionRef.current?.stop();
       sessionRef.current = null;
     };
@@ -36,30 +47,12 @@ export function VoicePage() {
     }
   }, [turns]);
 
-  const onOrbTap = async () => {
+  const toggleMic = () => {
+    if (!sessionRef.current) return;
     setError(null);
-    if (state === "idle") {
-      const session = new RealtimeSession({
-        onState: setState,
-        onTranscript: setTurns,
-        onError: (msg) => setError(msg),
-      });
-      sessionRef.current = session;
-      try {
-        await session.start();
-      } catch {
-        sessionRef.current = null;
-      }
-    } else {
-      sessionRef.current?.stop();
-      sessionRef.current = null;
-    }
-  };
-
-  const toggleMute = () => {
     const next = !muted;
     setMuted(next);
-    sessionRef.current?.setMuted(next);
+    sessionRef.current.setMuted(next);
   };
 
   const clearTranscript = () => {
@@ -67,8 +60,25 @@ export function VoicePage() {
     setTurns([]);
   };
 
-  const orbState =
-    state === "connecting" ? "thinking" : state === "idle" ? "idle" : state;
+  // The agent's session state and the local mute state are orthogonal.
+  // Compose them for display:
+  //  - connecting → orb in "thinking" pulse
+  //  - agent speaking/thinking → reflect agent state regardless of mic
+  //  - otherwise → muted = "idle" visual, unmuted = "listening" (mic hot)
+  let orbState: "idle" | "listening" | "thinking" | "speaking";
+  if (state === "connecting") orbState = "thinking";
+  else if (state === "speaking") orbState = "speaking";
+  else if (state === "thinking") orbState = "thinking";
+  else orbState = muted ? "idle" : "listening";
+
+  let stateLabel: string;
+  if (state === "connecting") stateLabel = "Connecting…";
+  else if (state === "speaking") stateLabel = "Speaking";
+  else if (state === "thinking") stateLabel = "Thinking";
+  else if (muted) stateLabel = "Tap to talk";
+  else stateLabel = "Listening";
+
+  const connected = state !== "connecting";
 
   return (
     <div className="page page-enter">
@@ -87,7 +97,7 @@ export function VoicePage() {
       </div>
 
       <div className="orb-stage">
-        <div className="orb" data-state={orbState} onClick={onOrbTap}>
+        <div className="orb" data-state={orbState} onClick={toggleMic}>
           <div className="orb-pulse" />
           <div className="orb-pulse delay" />
           <div className="orb-rim" />
@@ -96,14 +106,13 @@ export function VoicePage() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div className={"orb-state-label " + (state === "idle" ? "idle" : "")}>
+        <div className={"orb-state-label " + (orbState === "idle" ? "idle" : "")}>
           <span className="live" />
-          {STATE_LABEL[state]}
+          {stateLabel}
         </div>
         <div
           className={
-            "waveform " +
-            (state === "listening" || state === "speaking" ? "" : "silent")
+            "waveform " + (!muted && orbState !== "idle" ? "" : "silent")
           }
         >
           {Array.from({ length: 9 }).map((_, i) => (
@@ -130,7 +139,7 @@ export function VoicePage() {
       )}
 
       <div className="transcript" ref={transcriptRef}>
-        {turns.length === 0 && state === "idle" && (
+        {turns.length === 0 && state !== "connecting" && (
           <div
             style={{
               color: "var(--text-mute)",
@@ -141,7 +150,7 @@ export function VoicePage() {
               letterSpacing: "0.04em",
             }}
           >
-            tap the orb to start a conversation
+            tap the orb to open the mic · tap again to mute
           </div>
         )}
         {turns.map((t) => (
@@ -157,10 +166,10 @@ export function VoicePage() {
 
       <div className="voice-controls">
         <button
-          className={"icon-btn " + (muted ? "active" : "")}
-          onClick={toggleMute}
-          disabled={state === "idle" || state === "connecting"}
-          title={muted ? "Unmute" : "Mute"}
+          className={"icon-btn " + (!muted ? "active" : "")}
+          onClick={toggleMic}
+          disabled={!connected}
+          title={muted ? "Open mic" : "Mute"}
         >
           <Icon name={muted ? "mic-off" : "mic"} size={16} />
         </button>
@@ -181,18 +190,17 @@ export function VoicePage() {
               width: 5,
               height: 5,
               borderRadius: "50%",
-              background:
-                state === "idle"
+              background: !connected
+                ? "var(--accent)"
+                : muted
                   ? "var(--text-mute)"
-                  : state === "connecting"
-                    ? "var(--accent)"
-                    : "var(--ok)",
+                  : "var(--ok)",
             }}
           />
-          {state === "idle"
-            ? "disconnected"
-            : state === "connecting"
-              ? "connecting"
+          {!connected
+            ? "connecting"
+            : muted
+              ? "WebRTC · muted"
               : "WebRTC · live"}
         </div>
         <button
@@ -216,21 +224,23 @@ function ContextSheet({ onClose }: { onClose: () => void }) {
       <div className="sheet-backdrop" onClick={onClose} />
       <div className="sheet">
         <div className="sheet-handle" />
-        <h3>What Jarvis knows right now</h3>
+        <h3>How voice works</h3>
         <p
           className="text-mute"
           style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}
         >
-          Voice chat is live, but Jarvis isn't yet wired into your vault or
-          calendar. The agent has only its system prompt and the current time.
+          The connection opens automatically when you land on this tab. Tap
+          the orb to open the mic, tap again to mute. Jarvis only "hears" you
+          while the mic is open, so ambient noise won't interrupt his replies.
         </p>
-        <h3>Next: tools</h3>
+        <h3>What he knows</h3>
         <p
           className="text-mute"
           style={{ fontSize: 13, lineHeight: 1.5 }}
         >
-          The next pass adds tool-calls so Jarvis can read scoped vault notes
-          and check Google Calendar mid-conversation.
+          The current time, your vault scope list, and (when you ask about
+          one) the canonical notes inside that scope. Calendar awareness
+          comes next.
         </p>
       </div>
     </Fragment>

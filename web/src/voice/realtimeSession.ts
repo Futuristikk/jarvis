@@ -76,11 +76,16 @@ export class RealtimeSession {
       };
 
       for (const track of mic.getTracks()) pc.addTrack(track, mic);
+      // Start muted — push-to-talk style. UI tap unmutes when user is ready.
+      mic.getAudioTracks().forEach((t) => {
+        t.enabled = false;
+      });
 
       const dc = pc.createDataChannel("oai-events");
       this.dc = dc;
       dc.onmessage = (e) => this.handleServerEvent(e.data);
-      dc.onopen = () => this.setState("listening");
+      // Connection is live; agent will only "hear" us when the mic is unmuted.
+      dc.onopen = () => this.setState("idle");
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -208,7 +213,9 @@ export class RealtimeSession {
           // and triggers a new response.create when results land.
           void this.flushPendingTools();
         } else {
-          this.setState("listening");
+          // agent done speaking — back to idle. UI shows "Listening" if mic
+          // is unmuted, "Tap to talk" if muted.
+          this.setState("idle");
         }
         break;
       case "error": {
@@ -224,7 +231,7 @@ export class RealtimeSession {
   private async flushPendingTools() {
     if (!this.dc || this.dc.readyState !== "open") {
       this.pendingToolCalls = [];
-      this.setState("listening");
+      this.setState("idle");
       return;
     }
     const batch = this.pendingToolCalls.splice(0);
