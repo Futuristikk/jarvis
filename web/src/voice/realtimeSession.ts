@@ -1,4 +1,8 @@
-import { executeVoiceTool, getRealtimeToken } from "../api";
+import {
+  executeVoiceTool,
+  getRealtimeToken,
+  type RealtimeOptions,
+} from "../api";
 
 export type SessionState = "idle" | "connecting" | "listening" | "thinking" | "speaking";
 
@@ -34,6 +38,7 @@ export class RealtimeSession {
   private turns: Turn[] = [];
   private state: SessionState = "idle";
   private events: SessionEvents;
+  private opts: RealtimeOptions;
   // Tool calls collected during a response; flushed on response.done so we
   // never race the response state machine.
   private pendingToolCalls: Array<{
@@ -42,14 +47,15 @@ export class RealtimeSession {
     args: string;
   }> = [];
 
-  constructor(events: SessionEvents) {
+  constructor(events: SessionEvents, opts: RealtimeOptions = {}) {
     this.events = events;
+    this.opts = opts;
   }
 
   async start() {
     this.setState("connecting");
     try {
-      const session = await getRealtimeToken();
+      const session = await getRealtimeToken(this.opts);
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.mic = mic;
 

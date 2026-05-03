@@ -14,7 +14,9 @@ type ToolDef = {
   parameters: Record<string, unknown>;
 };
 
-const TOOLS: ToolDef[] = [
+type Mode = "jarvis" | "spanish";
+
+const VAULT_TOOLS: ToolDef[] = [
   {
     type: "function",
     name: "read_vault_scope",
@@ -36,21 +38,42 @@ const TOOLS: ToolDef[] = [
 
 /**
  * Mint an ephemeral OpenAI Realtime client secret for the PWA.
- * Vault scopes are fetched once at session creation and listed in the
- * instructions so the agent knows what's available without an extra round-trip.
+ *
+ * The body selects a "mode": jarvis (default — vault-aware general assistant)
+ * or spanish (conversational tutor at a target level/scenario, with es-ES
+ * input transcription). Vault scopes are fetched once at session creation for
+ * jarvis mode so the agent knows what's available without an extra round-trip.
  */
 voice.post("/realtime-token", async (c) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return c.json({ error: "OPENAI_API_KEY not configured" }, 500);
 
-  let scopes: string[] = [];
-  try {
-    scopes = (await listScopes()).filter((s) => s !== "");
-  } catch (err) {
-    console.warn("[voice] failed to list scopes:", err);
-  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    mode?: string;
+    level?: string;
+    scenario?: string;
+  };
+  const mode: Mode = body.mode === "spanish" ? "spanish" : "jarvis";
 
-  const instructions = buildInstructions(scopes);
+  let instructions: string;
+  let tools: ToolDef[];
+  let transcription: { model: string; language?: string };
+
+  if (mode === "spanish") {
+    instructions = buildSpanishInstructions(body.level, body.scenario);
+    tools = [];
+    transcription = { model: "whisper-1", language: "es" };
+  } else {
+    let scopes: string[] = [];
+    try {
+      scopes = (await listScopes()).filter((s) => s !== "");
+    } catch (err) {
+      console.warn("[voice] failed to list scopes:", err);
+    }
+    instructions = buildJarvisInstructions(scopes);
+    tools = VAULT_TOOLS;
+    transcription = { model: "whisper-1" };
+  }
 
   const res = await fetch("https://api.openai.com/v1/realtime/sessions", {
     method: "POST",
@@ -65,15 +88,15 @@ voice.post("/realtime-token", async (c) => {
       modalities: ["text", "audio"],
       input_audio_format: "pcm16",
       output_audio_format: "pcm16",
-      input_audio_transcription: { model: "whisper-1" },
+      input_audio_transcription: transcription,
       turn_detection: {
         type: "server_vad",
         threshold: 0.5,
         prefix_padding_ms: 300,
         silence_duration_ms: 500,
       },
-      tools: TOOLS,
-      tool_choice: "auto",
+      tools,
+      tool_choice: tools.length > 0 ? "auto" : "none",
     }),
   });
 
@@ -151,7 +174,7 @@ async function runReadVaultScope(
   return parts.join("\n");
 }
 
-function buildInstructions(scopes: string[]): string {
+function buildJarvisInstructions(scopes: string[]): string {
   const tz = process.env.SCHEDULER_TZ ?? "Europe/Madrid";
   const now = new Date().toLocaleString("en-US", {
     timeZone: tz,
@@ -182,4 +205,48 @@ function buildInstructions(scopes: string[]): string {
     "- When uncertain whether the user finished, briefly pause rather than filling.",
   );
   return lines.join("\n");
+}
+
+const LEVEL_GUIDANCE: Record<string, string> = {
+  A2: "Stick to present and basic past tenses, high-frequency vocabulary, short sentences (≤8 words). Avoid idioms and the subjunctive.",
+  B1: "Use past, present, future, and conditional. Common idioms are fine. Keep sentences ≤14 words.",
+  B2: "Full range of tenses including subjunctive. Use natural connectors and idioms. Don't dumb things down.",
+  C1: "Speak as you would to a native: rich vocabulary, regional idioms, full subjunctive use, hedging and nuance.",
+};
+
+const SCENARIO_GUIDANCE: Record<string, string> = {
+  "Café · casual":
+    "You're a friend Adam meets at a café in Barcelona. Small talk, weekend plans, food, neighborhood gossip. Warm and unhurried.",
+  Bureaucracy:
+    "You're a clerk at a Spanish administrative office (ayuntamiento, extranjería, hacienda). Formal but helpful. Use the bureaucratic vocabulary Adam needs to handle real paperwork.",
+  Doctor:
+    "You're a Spanish GP doing a routine consultation. Ask about symptoms, history, lifestyle. Use medical vocabulary a patient would actually hear.",
+};
+
+function buildSpanishInstructions(
+  levelRaw: string | undefined,
+  scenarioRaw: string | undefined,
+): string {
+  const level = (levelRaw ?? "B1").toUpperCase();
+  const scenario = scenarioRaw ?? "Café · casual";
+  const levelHint = LEVEL_GUIDANCE[level] ?? LEVEL_GUIDANCE.B1;
+  const scenarioHint =
+    SCENARIO_GUIDANCE[scenario] ??
+    `Stay in character for the scenario "${scenario}".`;
+
+  return [
+    "You are Adam's Spanish (Castilian, es-ES) conversation tutor. He lives in Barcelona and is practising for real life there.",
+    `His current level is ${level}. ${levelHint}`,
+    "",
+    `Scenario: ${scenario}. ${scenarioHint}`,
+    "",
+    "Hard rules:",
+    "- Speak ONLY in Spanish. Never switch to English unless he explicitly asks you to translate something.",
+    "- Keep every reply to 1–2 short sentences, then stop and let him respond.",
+    "- Stay in character and in scenario. Don't narrate, don't meta-comment ('great question', 'as your tutor…').",
+    "- If he makes a meaningful mistake (gender, conjugation, preposition, vocab), recast the correct form once inside your reply, then continue naturally. Don't lecture.",
+    "- If his transcription suggests a clear pronunciation slip, you may briefly model the correct word, then move on.",
+    "- Don't read URLs, hashtags, or long lists out loud.",
+    "- Pause and let him think rather than filling silence.",
+  ].join("\n");
 }

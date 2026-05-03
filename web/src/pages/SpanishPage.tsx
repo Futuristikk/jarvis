@@ -1,30 +1,16 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
+import {
+  RealtimeSession,
+  type SessionState,
+  type Turn,
+} from "../voice/realtimeSession";
 
-type Turn = { role: "agent" | "user"; words: string[]; translation: string };
+const LEVELS = ["A2", "B1", "B2", "C1"] as const;
+type Level = (typeof LEVELS)[number];
 
-const DIALOGUE: Turn[] = [
-  {
-    role: "agent",
-    words: ["Buenos", "días.", "¿Qué", "tal", "el", "fin", "de", "semana", "en", "la", "playa?"],
-    translation: "Good morning. How was the weekend at the beach?",
-  },
-  {
-    role: "user",
-    words: ["Muy", "bien,", "fuimos", "a", "Sitges", "el", "sábado."],
-    translation: "Very good, we went to Sitges on Saturday.",
-  },
-  {
-    role: "agent",
-    words: ["¡Qué", "bien!", "Sitges", "es", "precioso.", "¿Hicisteis", "algo", "especial?"],
-    translation: "How nice! Sitges is beautiful. Did you do anything special?",
-  },
-  {
-    role: "user",
-    words: ["Comimos", "paella", "en", "un", "chiringuito."],
-    translation: "We had paella at a beach bar.",
-  },
-];
+const SCENARIOS = ["Café · casual", "Bureaucracy", "Doctor"] as const;
+type Scenario = (typeof SCENARIOS)[number];
 
 const SAVED_VOCAB = [
   { es: "chiringuito", en: "beach bar" },
@@ -34,40 +20,100 @@ const SAVED_VOCAB = [
   { es: "empadronarse", en: "register at city hall" },
 ];
 
-const LEVELS = ["A2", "B1", "B2", "C1"] as const;
-type Level = (typeof LEVELS)[number];
-
 export function SpanishPage() {
-  const [turnIdx, setTurnIdx] = useState(0);
-  const [wordIdx, setWordIdx] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [showTranslation, setShowTranslation] = useState(true);
   const [level, setLevel] = useState<Level>("B1");
+  const [scenario, setScenario] = useState<Scenario>("Café · casual");
+  const [state, setState] = useState<SessionState>("connecting");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [muted, setMuted] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const sessionRef = useRef<RealtimeSession | null>(null);
 
-  const turn = DIALOGUE[turnIdx];
-
+  // Re-mint the session whenever the tutor mode parameters change so the new
+  // prompt takes effect. This is heavier than a `session.update` over the data
+  // channel but keeps the wiring obvious — the agent's instructions always
+  // match the pills you see.
   useEffect(() => {
-    if (!playing) return;
-    const t = setTimeout(
-      () => {
-        if (wordIdx < turn.words.length - 1) {
-          setWordIdx(wordIdx + 1);
-        } else {
-          setTimeout(() => {
-            setWordIdx(0);
-            setTurnIdx((i) => (i + 1) % DIALOGUE.length);
-          }, 900);
-        }
-      },
-      turn.role === "agent" ? 380 : 420,
-    );
-    return () => clearTimeout(t);
-  }, [wordIdx, turnIdx, playing, turn.role, turn.words.length]);
+    let disposed = false;
+    setError(null);
+    setTurns([]);
+    setMuted(true);
 
-  const past: string[] = [];
-  for (let i = Math.max(0, turnIdx - 2); i < turnIdx; i++) {
-    past.push(DIALOGUE[i].words.join(" "));
-  }
+    const session = new RealtimeSession(
+      {
+        onState: (s) => {
+          if (!disposed) setState(s);
+        },
+        onTranscript: (t) => {
+          if (!disposed) setTurns(t);
+        },
+        onError: (msg) => {
+          if (!disposed) setError(msg);
+        },
+      },
+      { mode: "spanish", level, scenario },
+    );
+    sessionRef.current = session;
+    session.start().catch(() => {
+      sessionRef.current = null;
+    });
+
+    return () => {
+      disposed = true;
+      sessionRef.current?.stop();
+      sessionRef.current = null;
+    };
+  }, [level, scenario]);
+
+  const toggleMic = () => {
+    if (!sessionRef.current) return;
+    setError(null);
+    const next = !muted;
+    setMuted(next);
+    sessionRef.current.setMuted(next);
+  };
+
+  // Pick the agent turn to karaoke-highlight: the latest agent turn we've
+  // received any text for. Show up to two prior turns as faded history.
+  const { currentAgent, pastTurns } = useMemo(() => {
+    let agentIdx = -1;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === "agent" && turns[i].text.length > 0) {
+        agentIdx = i;
+        break;
+      }
+    }
+    const past =
+      agentIdx >= 0
+        ? turns.slice(Math.max(0, agentIdx - 2), agentIdx)
+        : turns.slice(-2);
+    return {
+      currentAgent: agentIdx >= 0 ? turns[agentIdx] : null,
+      pastTurns: past,
+    };
+  }, [turns]);
+
+  // Most recent user turn — when the agent hasn't replied yet, surface it
+  // as the live line so the user sees their transcription land.
+  const liveUser =
+    currentAgent === null
+      ? [...turns].reverse().find((t) => t.role === "user") ?? null
+      : null;
+
+  let orbState: "idle" | "listening" | "thinking" | "speaking";
+  if (state === "connecting") orbState = "thinking";
+  else if (state === "speaking") orbState = "speaking";
+  else if (state === "thinking") orbState = "thinking";
+  else orbState = muted ? "idle" : "listening";
+
+  let stateLabel: string;
+  if (state === "connecting") stateLabel = "Connecting…";
+  else if (state === "speaking") stateLabel = "Jarvis · es-ES";
+  else if (state === "thinking") stateLabel = "Pensando…";
+  else if (muted) stateLabel = "Tap orb to talk";
+  else stateLabel = "Te escucho…";
+
+  const connected = state !== "connecting";
 
   return (
     <div className="page page-enter">
@@ -78,11 +124,10 @@ export function SpanishPage() {
         </div>
         <button
           className="topbar-action"
-          onClick={() => setShowTranslation((s) => !s)}
-          title="Toggle translation"
-          style={{ color: showTranslation ? "var(--accent)" : "var(--text-dim)" }}
+          onClick={() => sessionRef.current?.clearTranscript()}
+          title="Clear transcript"
         >
-          <Icon name="captions" size={18} />
+          <Icon name="x" size={18} />
         </button>
       </div>
 
@@ -105,15 +150,22 @@ export function SpanishPage() {
             margin: "4px 4px",
           }}
         />
-        <button className="pill active">Café · casual</button>
-        <button className="pill muted">Bureaucracy</button>
-        <button className="pill muted">Doctor</button>
+        {SCENARIOS.map((s) => (
+          <button
+            key={s}
+            className={"pill " + (scenario === s ? "active" : "muted")}
+            onClick={() => setScenario(s)}
+          >
+            {s}
+          </button>
+        ))}
       </div>
 
       <div className="orb-stage" style={{ padding: "8px 0 0" }}>
         <div
           className="orb"
-          data-state={turn.role === "agent" ? "speaking" : "listening"}
+          data-state={orbState}
+          onClick={toggleMic}
           style={{ ["--size" as string]: "120px" } as React.CSSProperties}
         >
           <div className="orb-rim" />
@@ -121,59 +173,57 @@ export function SpanishPage() {
         </div>
       </div>
 
+      {error && (
+        <div
+          style={{
+            margin: "4px 20px 0",
+            padding: "8px 12px",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            background: "var(--bg-1)",
+            color: "var(--danger)",
+            fontFamily: "var(--mono)",
+            fontSize: 11,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
       <div className="karaoke">
-        {past.length > 0 && (
+        {pastTurns.length > 0 && (
           <div className="karaoke-history">
-            {past.map((p, i) => (
-              <div key={i} className="past">
-                {p}
+            {pastTurns.map((t) => (
+              <div key={t.id} className="past">
+                {t.role === "user" ? "· " : ""}
+                {t.text}
               </div>
             ))}
           </div>
         )}
 
-        <div className={"karaoke-side " + (turn.role === "user" ? "user" : "")}>
+        <div
+          className={
+            "karaoke-side " +
+            ((currentAgent ?? liveUser)?.role === "user" ? "user" : "")
+          }
+        >
           <span className="live" />
-          {turn.role === "agent" ? "Jarvis · es-ES" : "You · es-ES"}
+          {stateLabel}
         </div>
 
-        <div className={"karaoke-line " + (turn.role === "user" ? "user" : "")}>
-          {turn.words.map((w, i) => (
-            <Fragment key={i}>
-              <span
-                className={
-                  "word " +
-                  (i < wordIdx ? "spoken " : "") +
-                  (i === wordIdx ? "active " : "")
-                }
-              >
-                {w}
-              </span>
-              {i < turn.words.length - 1 ? " " : ""}
-            </Fragment>
-          ))}
-        </div>
-
-        {showTranslation && <div className="karaoke-translation">{turn.translation}</div>}
-
-        {turn.role === "user" && turnIdx === 1 && wordIdx >= 4 && (
+        {currentAgent ? (
+          <KaraokeLine text={currentAgent.text} done={currentAgent.done} />
+        ) : liveUser ? (
+          <div className="karaoke-line user">{liveUser.text}</div>
+        ) : (
           <div
-            style={{
-              marginTop: 14,
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px dashed var(--line-2)",
-              background: "var(--bg-1)",
-              fontSize: 12,
-              fontFamily: "var(--mono)",
-              color: "var(--text-mute)",
-              maxWidth: 320,
-            }}
+            className="karaoke-line"
+            style={{ color: "var(--text-mute)", fontSize: 22 }}
           >
-            <span style={{ color: "var(--text-mute)" }}>you said </span>
-            <span style={{ color: "var(--danger)" }}>“sí-tjes”</span>
-            <span> · target </span>
-            <span style={{ color: "var(--accent)" }}>“síd-jes”</span>
+            {connected
+              ? "Tap the orb and say something en español."
+              : "Conectando…"}
           </div>
         )}
       </div>
@@ -211,11 +261,12 @@ export function SpanishPage() {
           style={{ display: "flex", gap: 8, justifyContent: "space-between", paddingTop: 4 }}
         >
           <button
-            className="icon-btn"
-            onClick={() => setPlaying(!playing)}
-            title={playing ? "Pause" : "Play"}
+            className={"icon-btn " + (!muted ? "active" : "")}
+            onClick={toggleMic}
+            disabled={!connected}
+            title={muted ? "Open mic" : "Mute"}
           >
-            <Icon name={playing ? "pause" : "play"} size={14} />
+            <Icon name={muted ? "mic-off" : "mic"} size={14} />
           </button>
           <div
             style={{
@@ -232,15 +283,63 @@ export function SpanishPage() {
             }}
           >
             <span
-              style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--ok)" }}
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: !connected
+                  ? "var(--accent)"
+                  : muted
+                    ? "var(--text-mute)"
+                    : "var(--ok)",
+              }}
             />
-            Realtime · 12:14 session
+            {!connected
+              ? "connecting"
+              : muted
+                ? `${level} · ${scenario}`
+                : `${level} · live`}
           </div>
-          <button className="icon-btn" title="Mic">
-            <Icon name="mic" size={14} />
+          <button
+            className="icon-btn"
+            onClick={() => sessionRef.current?.clearTranscript()}
+            disabled={turns.length === 0}
+            title="Clear"
+          >
+            <Icon name="x" size={14} />
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Karaoke line: the streaming agent transcript with the most recently
+ * arrived word highlighted as "active". Because OpenAI Realtime emits
+ * `response.audio_transcript.delta` events roughly in sync with the audio
+ * being spoken, treating the trailing token as the current word produces a
+ * natural follow-along highlight without needing per-word audio timestamps.
+ */
+function KaraokeLine({ text, done }: { text: string; done: boolean }) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lastIdx = words.length - 1;
+  return (
+    <div className="karaoke-line">
+      {words.map((w, i) => (
+        <Fragment key={i}>
+          <span
+            className={
+              "word " +
+              (done || i < lastIdx ? "spoken " : "") +
+              (!done && i === lastIdx ? "active " : "")
+            }
+          >
+            {w}
+          </span>
+          {i < lastIdx ? " " : ""}
+        </Fragment>
+      ))}
     </div>
   );
 }
