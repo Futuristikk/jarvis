@@ -100,6 +100,46 @@ export function SpanishPage() {
       ? [...turns].reverse().find((t) => t.role === "user") ?? null
       : null;
 
+  // Karaoke pacing. OpenAI Realtime emits transcript deltas faster than the
+  // audio is actually spoken — the text bursts in, the audio plays at speech
+  // rate. Without per-word timing, we advance the highlight cursor on a
+  // fixed cadence (~280ms/word ≈ natural casual Spanish) instead of jumping
+  // to the latest delta. Once the transcript is finalized we speed up so the
+  // cursor can catch up if it's behind by a few words.
+  //
+  // See: OpenAI realtime API has no per-token timestamps on
+  // response.audio_transcript.delta, and no audio↔text alignment events
+  // (community-confirmed open limitation).
+  const PACE_MS_LIVE = 280;
+  const PACE_MS_DONE = 110;
+
+  const allWords = useMemo(
+    () => (currentAgent ? currentAgent.text.split(/\s+/).filter(Boolean) : []),
+    [currentAgent?.text],
+  );
+
+  const [cursor, setCursor] = useState(0);
+  const cursorTurnRef = useRef<string | null>(null);
+
+  // Reset the cursor whenever a new agent turn begins.
+  useEffect(() => {
+    if (currentAgent?.id !== cursorTurnRef.current) {
+      cursorTurnRef.current = currentAgent?.id ?? null;
+      setCursor(0);
+    }
+  }, [currentAgent?.id]);
+
+  // Tick the cursor forward toward the latest received word count.
+  useEffect(() => {
+    if (!currentAgent) return;
+    if (cursor >= allWords.length) return;
+    const pace = currentAgent.done ? PACE_MS_DONE : PACE_MS_LIVE;
+    const id = setTimeout(() => {
+      setCursor((c) => Math.min(c + 1, allWords.length));
+    }, pace);
+    return () => clearTimeout(id);
+  }, [cursor, allWords.length, currentAgent?.done, currentAgent?.id]);
+
   let orbState: "idle" | "listening" | "thinking" | "speaking";
   if (state === "connecting") orbState = "thinking";
   else if (state === "speaking") orbState = "speaking";
@@ -213,7 +253,11 @@ export function SpanishPage() {
         </div>
 
         {currentAgent ? (
-          <KaraokeLine text={currentAgent.text} done={currentAgent.done} />
+          <KaraokeLine
+            words={allWords}
+            cursor={cursor}
+            done={currentAgent.done}
+          />
         ) : liveUser ? (
           <div className="karaoke-line user">{liveUser.text}</div>
         ) : (
@@ -315,31 +359,40 @@ export function SpanishPage() {
 }
 
 /**
- * Karaoke line: the streaming agent transcript with the most recently
- * arrived word highlighted as "active". Because OpenAI Realtime emits
- * `response.audio_transcript.delta` events roughly in sync with the audio
- * being spoken, treating the trailing token as the current word produces a
- * natural follow-along highlight without needing per-word audio timestamps.
+ * Karaoke line. The full received transcript is rendered; the `cursor`
+ * (paced by SpanishPage) drives which word is "active". Words at indices
+ * < cursor are "spoken" (white), the word at cursor is "active" (orange),
+ * and words ahead of the cursor are unstyled (muted) — so they read like
+ * upcoming lyrics until the cursor reaches them.
  */
-function KaraokeLine({ text, done }: { text: string; done: boolean }) {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lastIdx = words.length - 1;
+function KaraokeLine({
+  words,
+  cursor,
+  done,
+}: {
+  words: string[];
+  cursor: number;
+  done: boolean;
+}) {
+  const allDone = done && cursor >= words.length;
   return (
     <div className="karaoke-line">
-      {words.map((w, i) => (
-        <Fragment key={i}>
-          <span
-            className={
-              "word " +
-              (done || i < lastIdx ? "spoken " : "") +
-              (!done && i === lastIdx ? "active " : "")
-            }
-          >
-            {w}
-          </span>
-          {i < lastIdx ? " " : ""}
-        </Fragment>
-      ))}
+      {words.map((w, i) => {
+        const spoken = allDone || i < cursor;
+        const active = !allDone && i === cursor;
+        return (
+          <Fragment key={i}>
+            <span
+              className={
+                "word " + (spoken ? "spoken " : "") + (active ? "active " : "")
+              }
+            >
+              {w}
+            </span>
+            {i < words.length - 1 ? " " : ""}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
