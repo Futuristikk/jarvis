@@ -102,16 +102,21 @@ export function SpanishPage() {
 
   // Karaoke pacing. OpenAI Realtime emits transcript deltas faster than the
   // audio is actually spoken — the text bursts in, the audio plays at speech
-  // rate. Without per-word timing, we advance the highlight cursor on a
-  // fixed cadence (~280ms/word ≈ natural casual Spanish) instead of jumping
-  // to the latest delta. Once the transcript is finalized we speed up so the
-  // cursor can catch up if it's behind by a few words.
+  // rate, and the realtime API exposes no per-token timestamps or audio↔text
+  // alignment events (community-confirmed open limitation). So we advance the
+  // highlight cursor on a fixed cadence (`PACE_MS_PER_WORD`) regardless of
+  // delta arrival.
   //
-  // See: OpenAI realtime API has no per-token timestamps on
-  // response.audio_transcript.delta, and no audio↔text alignment events
-  // (community-confirmed open limitation).
-  const PACE_MS_LIVE = 280;
-  const PACE_MS_DONE = 110;
+  // We deliberately do NOT speed the cursor up when `audio_transcript.done`
+  // fires: that event marks the end of text generation, not the end of audio
+  // playback. The user's speakers can still be 1–3s behind because of the
+  // WebRTC jitter buffer + queued audio frames. Sprinting at that point made
+  // the cursor lap the spoken audio. If the cursor lags by a word or two at
+  // the end, that reads as natural follow-along, not as a glitch.
+  //
+  // Tune this single constant: lower = faster cursor, higher = slower.
+  // Castilian "verse" voice sits roughly ~140 wpm in our tests → ~430ms/word.
+  const PACE_MS_PER_WORD = 430;
 
   const allWords = useMemo(
     () => (currentAgent ? currentAgent.text.split(/\s+/).filter(Boolean) : []),
@@ -133,12 +138,11 @@ export function SpanishPage() {
   useEffect(() => {
     if (!currentAgent) return;
     if (cursor >= allWords.length) return;
-    const pace = currentAgent.done ? PACE_MS_DONE : PACE_MS_LIVE;
     const id = setTimeout(() => {
       setCursor((c) => Math.min(c + 1, allWords.length));
-    }, pace);
+    }, PACE_MS_PER_WORD);
     return () => clearTimeout(id);
-  }, [cursor, allWords.length, currentAgent?.done, currentAgent?.id]);
+  }, [cursor, allWords.length, currentAgent?.id]);
 
   let orbState: "idle" | "listening" | "thinking" | "speaking";
   if (state === "connecting") orbState = "thinking";
