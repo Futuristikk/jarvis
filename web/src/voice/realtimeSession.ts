@@ -17,6 +17,14 @@ export type SessionEvents = {
   onState: (s: SessionState) => void;
   onTranscript: (turns: Turn[]) => void;
   onError: (msg: string) => void;
+  /**
+   * Optional. Fires periodically while the agent is *audibly* speaking
+   * (above a silence threshold on the remote audio MediaStream). `activeMs`
+   * is the cumulative active-speech time for `itemId` so far, with silent
+   * gaps excluded — useful for driving a karaoke cursor that pauses with
+   * the agent. Resets to 0 when a new agent item starts speaking.
+   */
+  onAudioPulse?: (itemId: string, activeMs: number) => void;
 };
 
 type ServerEvent = {
@@ -46,6 +54,16 @@ export class RealtimeSession {
     name: string;
     args: string;
   }> = [];
+  // Web-Audio analyser tap on the remote stream. The realtime API exposes no
+  // audio↔text alignment events, so we measure actual playback ourselves and
+  // count active-speech ms per agent item — that drives the karaoke cursor.
+  private audioCtx: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private analyserBuf: Uint8Array | null = null;
+  private analyserTimer: number | null = null;
+  private currentSpeakingId: string | null = null;
+  private speechActiveMs = 0;
+  private lastAnalyserTickAt = 0;
 
   constructor(events: SessionEvents, opts: RealtimeOptions = {}) {
     this.events = events;
@@ -79,6 +97,10 @@ export class RealtimeSession {
         audioEl.play().catch(() => {
           /* ignore — autoplay may still kick in */
         });
+        // Tap the same stream for analyser-based speech detection. Failures
+        // are non-fatal — the consumer's pulse callback simply won't fire
+        // and they should fall back to a timer.
+        if (this.events.onAudioPulse) this.setupAnalyser(e.streams[0]);
       };
 
       for (const track of mic.getTracks()) pc.addTrack(track, mic);
@@ -123,6 +145,7 @@ export class RealtimeSession {
   }
 
   stop() {
+    this.teardownAnalyser();
     try {
       this.dc?.close();
     } catch {
@@ -191,9 +214,18 @@ export class RealtimeSession {
       case "response.audio.done":
       case "response.output_audio.delta":
       case "response.output_audio.done":
-      case "response.output_audio_buffer.started":
+      case "response.output_audio_buffer.started": {
         if (this.state !== "speaking") this.setState("speaking");
+        // Tag whichever item the analyser should credit active speech to.
+        // Audio events carry item_id; first delta for a new item resets the
+        // counter so a fresh agent turn starts at 0ms.
+        const itemId = String(evt.item_id ?? "");
+        if (itemId && itemId !== this.currentSpeakingId) {
+          this.currentSpeakingId = itemId;
+          this.speechActiveMs = 0;
+        }
         break;
+      }
       case "response.audio_transcript.delta": {
         const delta = String(evt.delta ?? "");
         const itemId = String(evt.item_id ?? "");
@@ -265,6 +297,95 @@ export class RealtimeSession {
     }
     // Ask the model to continue now that tool outputs are in scope.
     this.dc.send(JSON.stringify({ type: "response.create" }));
+  }
+
+  /**
+   * Tap the remote audio MediaStream with an AnalyserNode and start a
+   * sampling loop that credits "active speech ms" to the current agent item.
+   *
+   * Notes:
+   *  - Chromium needs the analyser graph to be pulled by something downstream
+   *    of the MediaStreamSource or it returns silence; a zero-gain connection
+   *    to `ctx.destination` provides that pull without doubling audio output
+   *    (the <audio> element is still the actual sink).
+   *  - The AudioContext may start `suspended` under autoplay policy; we
+   *    `resume()` and ignore the rejection — the orb tap that started the
+   *    session counts as a user gesture and unsuspends it eventually.
+   */
+  private setupAnalyser(stream: MediaStream) {
+    if (this.audioCtx) return;
+    try {
+      const Ctx =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      ctx.resume().catch(() => {
+        /* ignore */
+      });
+
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      const muteGain = ctx.createGain();
+      muteGain.gain.value = 0;
+      source.connect(analyser);
+      analyser.connect(muteGain);
+      muteGain.connect(ctx.destination);
+
+      this.audioCtx = ctx;
+      this.analyser = analyser;
+      this.analyserBuf = new Uint8Array(analyser.frequencyBinCount);
+      this.lastAnalyserTickAt = performance.now();
+
+      // ~50ms tick — fast enough to feel real-time, cheap enough to ignore.
+      this.analyserTimer = window.setInterval(() => this.analyserTick(), 50);
+    } catch (err) {
+      console.warn("[realtime] analyser setup failed:", err);
+    }
+  }
+
+  private analyserTick() {
+    if (!this.analyser || !this.analyserBuf || !this.events.onAudioPulse) return;
+    // PCM time-domain samples in [0, 255], 128 = silence baseline.
+    const buf = this.analyserBuf as Uint8Array;
+    this.analyser.getByteTimeDomainData(buf as unknown as Uint8Array<ArrayBuffer>);
+    let sumSq = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = buf[i] - 128;
+      sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / buf.length);
+
+    const now = performance.now();
+    const elapsed = now - this.lastAnalyserTickAt;
+    this.lastAnalyserTickAt = now;
+
+    // Threshold tuned empirically against gpt-realtime "verse" output. Below
+    // this is room noise / between-word silence; above this is voiced audio.
+    const SILENCE_RMS = 3;
+    if (rms > SILENCE_RMS && this.currentSpeakingId) {
+      this.speechActiveMs += elapsed;
+      this.events.onAudioPulse(this.currentSpeakingId, this.speechActiveMs);
+    }
+  }
+
+  private teardownAnalyser() {
+    if (this.analyserTimer !== null) {
+      clearInterval(this.analyserTimer);
+      this.analyserTimer = null;
+    }
+    try {
+      this.audioCtx?.close();
+    } catch {
+      // ignore
+    }
+    this.audioCtx = null;
+    this.analyser = null;
+    this.analyserBuf = null;
+    this.currentSpeakingId = null;
+    this.speechActiveMs = 0;
   }
 
   private appendTurn(id: string, role: Turn["role"], text: string, done: boolean) {

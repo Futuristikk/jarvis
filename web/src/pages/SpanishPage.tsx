@@ -27,6 +27,10 @@ export function SpanishPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [muted, setMuted] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // activeMs of audible speech per agent item, fed by the analyser tap on
+  // the remote MediaStream. Used to drive the karaoke cursor in lockstep
+  // with the audio actually coming out of the speaker.
+  const [audioMsByTurn, setAudioMsByTurn] = useState<Record<string, number>>({});
   const sessionRef = useRef<RealtimeSession | null>(null);
 
   // Re-mint the session whenever the tutor mode parameters change so the new
@@ -37,6 +41,7 @@ export function SpanishPage() {
     let disposed = false;
     setError(null);
     setTurns([]);
+    setAudioMsByTurn({});
     setMuted(true);
 
     const session = new RealtimeSession(
@@ -49,6 +54,12 @@ export function SpanishPage() {
         },
         onError: (msg) => {
           if (!disposed) setError(msg);
+        },
+        onAudioPulse: (itemId, ms) => {
+          if (disposed) return;
+          setAudioMsByTurn((prev) =>
+            prev[itemId] === ms ? prev : { ...prev, [itemId]: ms },
+          );
         },
       },
       { mode: "spanish", level, scenario },
@@ -100,49 +111,67 @@ export function SpanishPage() {
       ? [...turns].reverse().find((t) => t.role === "user") ?? null
       : null;
 
-  // Karaoke pacing. OpenAI Realtime emits transcript deltas faster than the
-  // audio is actually spoken — the text bursts in, the audio plays at speech
-  // rate, and the realtime API exposes no per-token timestamps or audio↔text
-  // alignment events (community-confirmed open limitation). So we advance the
-  // highlight cursor on a fixed cadence (`PACE_MS_PER_WORD`) regardless of
-  // delta arrival.
+  // Karaoke pacing.
   //
-  // We deliberately do NOT speed the cursor up when `audio_transcript.done`
-  // fires: that event marks the end of text generation, not the end of audio
-  // playback. The user's speakers can still be 1–3s behind because of the
-  // WebRTC jitter buffer + queued audio frames. Sprinting at that point made
-  // the cursor lap the spoken audio. If the cursor lags by a word or two at
-  // the end, that reads as natural follow-along, not as a glitch.
+  // Primary: an AnalyserNode tap on the remote MediaStream (in
+  // RealtimeSession) emits `onAudioPulse(itemId, activeMs)` ~20×/sec while
+  // the agent is *audibly* speaking. Cursor = floor(activeMs / PER_WORD),
+  // capped at received word count. This pauses the cursor during the
+  // agent's natural between-word silences and stays locked to the actual
+  // audio coming out of the speaker — sidestepping the WebRTC jitter
+  // buffer and the absence of any audio↔text alignment events in the
+  // OpenAI Realtime API.
   //
-  // Tune this single constant: lower = faster cursor, higher = slower.
-  // Castilian "verse" voice sits roughly ~140 wpm in our tests → ~430ms/word.
-  const PACE_MS_PER_WORD = 430;
+  // Fallback: if no pulse has arrived for the current turn within ~700ms
+  // of the agent starting (e.g. analyser graph blocked, AudioContext
+  // suspended on iOS), drift the cursor on a steady timer so the line
+  // still moves.
+  //
+  // Tune for cursor tempo within active speech.
+  const PACE_MS_PER_WORD = 320;
+  const FALLBACK_DELAY_MS = 700;
+  const FALLBACK_PACE_MS = 430;
 
   const allWords = useMemo(
     () => (currentAgent ? currentAgent.text.split(/\s+/).filter(Boolean) : []),
     [currentAgent?.text],
   );
 
-  const [cursor, setCursor] = useState(0);
+  const [fallbackCursor, setFallbackCursor] = useState(0);
   const cursorTurnRef = useRef<string | null>(null);
+  const turnAppearedAtRef = useRef<number>(0);
 
-  // Reset the cursor whenever a new agent turn begins.
+  // Reset whenever a new agent turn begins.
   useEffect(() => {
     if (currentAgent?.id !== cursorTurnRef.current) {
       cursorTurnRef.current = currentAgent?.id ?? null;
-      setCursor(0);
+      turnAppearedAtRef.current = performance.now();
+      setFallbackCursor(0);
     }
   }, [currentAgent?.id]);
 
-  // Tick the cursor forward toward the latest received word count.
+  // Audio-driven cursor (preferred).
+  const audioMs = currentAgent ? audioMsByTurn[currentAgent.id] : undefined;
+  const audioCursor =
+    audioMs !== undefined
+      ? Math.min(Math.floor(audioMs / PACE_MS_PER_WORD), allWords.length)
+      : null;
+
+  // Fallback timer: only ticks once we've waited past FALLBACK_DELAY_MS
+  // without any pulse data — otherwise the audio cursor takes over.
   useEffect(() => {
     if (!currentAgent) return;
-    if (cursor >= allWords.length) return;
+    if (audioCursor !== null) return;
+    if (fallbackCursor >= allWords.length) return;
+    const sinceTurn = performance.now() - turnAppearedAtRef.current;
+    const wait = Math.max(FALLBACK_PACE_MS, FALLBACK_DELAY_MS - sinceTurn);
     const id = setTimeout(() => {
-      setCursor((c) => Math.min(c + 1, allWords.length));
-    }, PACE_MS_PER_WORD);
+      setFallbackCursor((c) => Math.min(c + 1, allWords.length));
+    }, wait);
     return () => clearTimeout(id);
-  }, [cursor, allWords.length, currentAgent?.id]);
+  }, [fallbackCursor, allWords.length, currentAgent?.id, audioCursor]);
+
+  const cursor = audioCursor ?? fallbackCursor;
 
   let orbState: "idle" | "listening" | "thinking" | "speaking";
   if (state === "connecting") orbState = "thinking";
