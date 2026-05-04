@@ -269,6 +269,13 @@ export async function getRealtimeToken(opts: RealtimeOptions = {}) {
   });
 }
 
+export async function getRealtimeInstructions(opts: RealtimeOptions = {}) {
+  return jsonFetch<{ instructions: string }>("/voice/instructions", {
+    method: "POST",
+    body: JSON.stringify(opts),
+  });
+}
+
 export async function executeVoiceTool(
   name: string,
   args: Record<string, unknown>,

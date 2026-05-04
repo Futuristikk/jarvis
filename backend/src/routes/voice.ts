@@ -44,6 +44,41 @@ const VAULT_TOOLS: ToolDef[] = [
  * input transcription). Vault scopes are fetched once at session creation for
  * jarvis mode so the agent knows what's available without an extra round-trip.
  */
+type VoiceConfig = {
+  mode: Mode;
+  instructions: string;
+  tools: ToolDef[];
+  transcription: { model: string; language?: string };
+};
+
+async function buildVoiceConfig(body: {
+  mode?: string;
+  level?: string;
+  scenario?: string;
+}): Promise<VoiceConfig> {
+  const mode: Mode = body.mode === "spanish" ? "spanish" : "jarvis";
+  if (mode === "spanish") {
+    return {
+      mode,
+      instructions: buildSpanishInstructions(body.level, body.scenario),
+      tools: [],
+      transcription: { model: "whisper-1", language: "es" },
+    };
+  }
+  let scopes: string[] = [];
+  try {
+    scopes = (await listScopes()).filter((s) => s !== "");
+  } catch (err) {
+    console.warn("[voice] failed to list scopes:", err);
+  }
+  return {
+    mode,
+    instructions: buildJarvisInstructions(scopes),
+    tools: VAULT_TOOLS,
+    transcription: { model: "whisper-1" },
+  };
+}
+
 voice.post("/realtime-token", async (c) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return c.json({ error: "OPENAI_API_KEY not configured" }, 500);
@@ -53,27 +88,7 @@ voice.post("/realtime-token", async (c) => {
     level?: string;
     scenario?: string;
   };
-  const mode: Mode = body.mode === "spanish" ? "spanish" : "jarvis";
-
-  let instructions: string;
-  let tools: ToolDef[];
-  let transcription: { model: string; language?: string };
-
-  if (mode === "spanish") {
-    instructions = buildSpanishInstructions(body.level, body.scenario);
-    tools = [];
-    transcription = { model: "whisper-1", language: "es" };
-  } else {
-    let scopes: string[] = [];
-    try {
-      scopes = (await listScopes()).filter((s) => s !== "");
-    } catch (err) {
-      console.warn("[voice] failed to list scopes:", err);
-    }
-    instructions = buildJarvisInstructions(scopes);
-    tools = VAULT_TOOLS;
-    transcription = { model: "whisper-1" };
-  }
+  const { instructions, tools, transcription } = await buildVoiceConfig(body);
 
   const res = await fetch("https://api.openai.com/v1/realtime/sessions", {
     method: "POST",
@@ -114,6 +129,22 @@ voice.post("/realtime-token", async (c) => {
     expiresAt: session.client_secret.expires_at,
     model: REALTIME_MODEL,
   });
+});
+
+/**
+ * Return the system instructions for the given mode/level/scenario without
+ * minting a new realtime token. The PWA pushes these over the data channel
+ * via a `session.update` so it can switch tutor configuration mid-call
+ * without dropping the WebRTC session.
+ */
+voice.post("/instructions", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    mode?: string;
+    level?: string;
+    scenario?: string;
+  };
+  const { instructions } = await buildVoiceConfig(body);
+  return c.json({ instructions });
 });
 
 /**

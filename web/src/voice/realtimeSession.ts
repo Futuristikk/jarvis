@@ -174,6 +174,22 @@ export class RealtimeSession {
     });
   }
 
+  /**
+   * Push new system instructions over the data channel without tearing the
+   * WebRTC session down. Used by the Spanish tutor when the user changes
+   * level or scenario mid-call so the connection — and the karaoke state —
+   * survive the swap.
+   */
+  updateInstructions(instructions: string) {
+    if (!this.dc || this.dc.readyState !== "open") return;
+    this.dc.send(
+      JSON.stringify({
+        type: "session.update",
+        session: { instructions },
+      }),
+    );
+  }
+
   clearTranscript() {
     this.turns = [];
     this.events.onTranscript([]);

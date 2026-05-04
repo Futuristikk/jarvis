@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
+import { getRealtimeInstructions } from "../api";
 import {
   RealtimeSession,
   type SessionState,
@@ -33,17 +34,14 @@ export function SpanishPage() {
   const [audioMsByTurn, setAudioMsByTurn] = useState<Record<string, number>>({});
   const sessionRef = useRef<RealtimeSession | null>(null);
 
-  // Re-mint the session whenever the tutor mode parameters change so the new
-  // prompt takes effect. This is heavier than a `session.update` over the data
-  // channel but keeps the wiring obvious — the agent's instructions always
-  // match the pills you see.
+  // Initial level/scenario captured at mount so the first session is minted
+  // with whatever's selected. Changes after mount are pushed via
+  // `session.update` (below) so the WebRTC session — and the karaoke state —
+  // survive level/scenario swaps without a reconnect.
+  const initialOptsRef = useRef({ level, scenario });
+
   useEffect(() => {
     let disposed = false;
-    setError(null);
-    setTurns([]);
-    setAudioMsByTurn({});
-    setMuted(true);
-
     const session = new RealtimeSession(
       {
         onState: (s) => {
@@ -62,7 +60,11 @@ export function SpanishPage() {
           );
         },
       },
-      { mode: "spanish", level, scenario },
+      {
+        mode: "spanish",
+        level: initialOptsRef.current.level,
+        scenario: initialOptsRef.current.scenario,
+      },
     );
     sessionRef.current = session;
     session.start().catch(() => {
@@ -73,6 +75,35 @@ export function SpanishPage() {
       disposed = true;
       sessionRef.current?.stop();
       sessionRef.current = null;
+    };
+  }, []);
+
+  // After mount, push level/scenario changes as a `session.update` over the
+  // open data channel — connection stays open, transcript stays intact, and
+  // the agent's next reply uses the new instructions.
+  const skipFirstUpdateRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstUpdateRef.current) {
+      skipFirstUpdateRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getRealtimeInstructions({
+          mode: "spanish",
+          level,
+          scenario,
+        });
+        if (!cancelled) sessionRef.current?.updateInstructions(res.instructions);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, [level, scenario]);
 
@@ -234,15 +265,24 @@ export function SpanishPage() {
         ))}
       </div>
 
-      <div className="orb-stage" style={{ padding: "8px 0 0" }}>
+      <div className="orb-stage" style={{ padding: "12px 0 4px" }}>
         <div
           className="orb"
           data-state={orbState}
           onClick={toggleMic}
-          style={{ ["--size" as string]: "120px" } as React.CSSProperties}
+          style={{ ["--size" as string]: "150px" } as React.CSSProperties}
         >
+          <div className="orb-pulse" />
+          <div className="orb-pulse delay" />
           <div className="orb-rim" />
           <div className="orb-core" />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <div className={"orb-state-label " + (orbState === "idle" ? "idle" : "")}>
+          <span className="live" />
+          {stateLabel}
         </div>
       </div>
 
@@ -335,56 +375,36 @@ export function SpanishPage() {
         </div>
 
         <div
-          style={{ display: "flex", gap: 8, justifyContent: "space-between", paddingTop: 4 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: "var(--mono)",
+            fontSize: 10,
+            color: "var(--text-mute)",
+            justifyContent: "center",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            paddingTop: 4,
+          }}
         >
-          <button
-            className={"icon-btn " + (!muted ? "active" : "")}
-            onClick={toggleMic}
-            disabled={!connected}
-            title={muted ? "Open mic" : "Mute"}
-          >
-            <Icon name={muted ? "mic-off" : "mic"} size={14} />
-          </button>
-          <div
+          <span
             style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontFamily: "var(--mono)",
-              fontSize: 10,
-              color: "var(--text-mute)",
-              justifyContent: "center",
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              background: !connected
+                ? "var(--accent)"
+                : muted
+                  ? "var(--text-mute)"
+                  : "var(--ok)",
             }}
-          >
-            <span
-              style={{
-                width: 5,
-                height: 5,
-                borderRadius: "50%",
-                background: !connected
-                  ? "var(--accent)"
-                  : muted
-                    ? "var(--text-mute)"
-                    : "var(--ok)",
-              }}
-            />
-            {!connected
-              ? "connecting"
-              : muted
-                ? `${level} · ${scenario}`
-                : `${level} · live`}
-          </div>
-          <button
-            className="icon-btn"
-            onClick={() => sessionRef.current?.clearTranscript()}
-            disabled={turns.length === 0}
-            title="Clear"
-          >
-            <Icon name="x" size={14} />
-          </button>
+          />
+          {!connected
+            ? "connecting"
+            : muted
+              ? `${level} · ${scenario}`
+              : `${level} · live`}
         </div>
       </div>
     </div>
