@@ -1,10 +1,14 @@
+import { Capacitor } from "@capacitor/core";
 import { getToken, setToken } from "./auth";
 
-const BASE =
-  import.meta.env.VITE_BACKEND_URL ??
-  window.location.origin;
+const PRODUCTION_BACKEND = "https://jarvis-production-5588.up.railway.app";
 
-const API_BASE = `${BASE}/api`;
+const configuredBackend = import.meta.env.VITE_BACKEND_URL?.trim();
+const backendBase =
+  configuredBackend ||
+  (Capacitor.isNativePlatform() ? PRODUCTION_BACKEND : window.location.origin);
+
+const API_BASE = `${backendBase.replace(/\/+$/, "")}/api`;
 
 export type TaskStatus =
   | "queued"
@@ -81,18 +85,38 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
     setToken(null);
     throw new Error("unauthorized");
   }
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`${r.status} ${path}: ${body.slice(0, 200)}`);
+  const contentType = r.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(
+      `Die API hat für ${path} keine JSON-Antwort geliefert (HTTP ${r.status}).`,
+    );
   }
-  return r.json() as Promise<T>;
+
+  const body = (await r.json().catch(() => null)) as
+    | (T & { error?: string })
+    | null;
+  if (!body) {
+    throw new Error(`Die API-Antwort für ${path} ist ungültig.`);
+  }
+  if (!r.ok) {
+    throw new Error(body.error || `API-Fehler ${r.status} bei ${path}.`);
+  }
+  return body;
 }
 
 export async function verifyPassword(password: string): Promise<boolean> {
-  const r = await fetch(`${API_BASE}/auth/verify`, {
-    headers: { authorization: `Bearer ${password}` },
-  });
-  return r.ok;
+  try {
+    const r = await fetch(`${API_BASE}/auth/verify`, {
+      headers: { authorization: `Bearer ${password}` },
+    });
+    if (!r.ok || !(r.headers.get("content-type") ?? "").includes("application/json")) {
+      return false;
+    }
+    const body = (await r.json().catch(() => null)) as { ok?: boolean } | null;
+    return body?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getHealth() {

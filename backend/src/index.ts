@@ -10,9 +10,12 @@ import { voice } from "./routes/voice.js";
 
 const app = new Hono();
 
+const configuredOrigin = process.env.JARVIS_ORIGIN?.replace(/\/+$/, "");
+
 const allowedOrigins = new Set([
   "http://localhost:5173",
-  ...(process.env.JARVIS_ORIGIN ? [process.env.JARVIS_ORIGIN] : []),
+  "https://localhost",
+  ...(configuredOrigin ? [configuredOrigin] : []),
 ]);
 
 app.use("*", logger());
@@ -62,6 +65,10 @@ if (process.env.CONVEX_URL) {
   app.route("/api/schedules", schedules);
   startWorker();
 }
+
+app.all("/api/*", (c) =>
+  c.json({ error: "Die angeforderte API-Route existiert nicht." }, 404),
+);
 
 app.use("/*", serveStatic({ root: "../web/dist" }));
 app.get("*", serveStatic({ path: "../web/dist/index.html" }));
