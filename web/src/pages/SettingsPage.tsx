@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { setToken } from "../auth";
+import { ContactAccessCard } from "../components/ContactAccessCard";
 import { DeviceAccessCard } from "../components/DeviceAccessCard";
 import { LocationAccessCard } from "../components/LocationAccessCard";
 import { isNativeApp, openWebSearch, openWhatsApp, shareJarvis } from "../native";
@@ -60,6 +61,7 @@ export function SettingsPage() {
         </section>
         <DeviceAccessCard />
         <LocationAccessCard />
+        <ContactAccessCard />
         <section className="surface-card">
           <strong>Sicherheit</strong>
           <p>

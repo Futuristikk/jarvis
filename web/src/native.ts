@@ -1,14 +1,54 @@
 import { AppLauncher } from "@capacitor/app-launcher";
 import { Browser } from "@capacitor/browser";
 import { Camera } from "@capacitor/camera";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Share } from "@capacitor/share";
 import { Geolocation } from "@capacitor/geolocation";
 
 const JARVIS_URL = "https://jarvis-production-5588.up.railway.app/";
 
+type ContactPickerResult = {
+  cancelled: boolean;
+  name?: string;
+  phone?: string;
+};
+
+type ContactPickerPlugin = {
+  pickPhoneContact(): Promise<ContactPickerResult>;
+};
+
+const ContactPicker = registerPlugin<ContactPickerPlugin>("ContactPicker");
+
+export type PhoneContact = {
+  name: string;
+  phone: string;
+};
+
 export function isNativeApp() {
   return Capacitor.isNativePlatform();
+}
+
+export async function pickPhoneContact(): Promise<PhoneContact | null> {
+  if (!Capacitor.isNativePlatform()) {
+    throw new Error(
+      "Die Kontaktauswahl ist nur in der installierten Android-App verfügbar.",
+    );
+  }
+
+  const result = await ContactPicker.pickPhoneContact();
+  if (result.cancelled) {
+    return null;
+  }
+
+  const phone = result.phone?.trim();
+  if (!phone) {
+    throw new Error("Für den ausgewählten Kontakt wurde keine Telefonnummer gefunden.");
+  }
+
+  return {
+    name: result.name?.trim() || "Kontakt ohne Namen",
+    phone,
+  };
 }
 
 export async function openWebSearch() {
