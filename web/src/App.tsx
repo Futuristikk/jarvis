@@ -2,25 +2,28 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./components/Icon";
 import { Login } from "./components/Login";
 import { ChatPage } from "./pages/ChatPage";
+import { NotesPage } from "./pages/NotesPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { TasksPage } from "./pages/TasksPage";
 import { VoicePage } from "./pages/VoicePage";
-import { SpanishPage } from "./pages/SpanishPage";
-import { VaultPage } from "./pages/VaultPage";
 import { getToken, onTokenChange } from "./auth";
 
-type PageId = "chat" | "voice" | "spanish" | "vault";
+type PageId = "chat" | "voice" | "tasks" | "notes" | "settings";
 
 const TABS: { id: PageId; label: string; icon: IconName }[] = [
-  { id: "chat", label: "Chat", icon: "book" },
+  { id: "chat", label: "Chat", icon: "send" },
   { id: "voice", label: "Sprache", icon: "voice" },
-  { id: "spanish", label: "Spanisch", icon: "headphones" },
-  { id: "vault", label: "Notizen", icon: "book" },
+  { id: "tasks", label: "Aufgaben", icon: "calendar" },
+  { id: "notes", label: "Notizen", icon: "book" },
+  { id: "settings", label: "Einstellungen", icon: "settings" },
 ];
 
 const PAGES: Record<PageId, ReactNode> = {
   chat: <ChatPage />,
   voice: <VoicePage />,
-  spanish: <SpanishPage />,
-  vault: <VaultPage />,
+  tasks: <TasksPage />,
+  notes: <NotesPage />,
+  settings: <SettingsPage />,
 };
 
 export default function App() {
@@ -34,17 +37,18 @@ export default function App() {
   return (
     <div className="app">
       {PAGES[page]}
-      <nav className="tabbar">
-        {TABS.map((t) => (
+      <nav className="tabbar" aria-label="Hauptnavigation">
+        {TABS.map((tab) => (
           <button
-            key={t.id}
-            className={page === t.id ? "active" : ""}
-            onClick={() => setPage(t.id)}
+            key={tab.id}
+            className={page === tab.id ? "active" : ""}
+            onClick={() => setPage(tab.id)}
+            aria-current={page === tab.id ? "page" : undefined}
           >
             <span className="tab-icon">
-              <Icon name={t.icon} size={20} stroke={1.6} />
+              <Icon name={tab.icon} size={20} stroke={1.6} />
             </span>
-            {t.label}
+            {tab.label}
             <span className="tab-dot" />
           </button>
         ))}

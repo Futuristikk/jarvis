@@ -1,10 +1,11 @@
-import {
-  executeVoiceTool,
-  getRealtimeToken,
-  type RealtimeOptions,
-} from "../api";
+import { executeVoiceTool, getRealtimeToken } from "../api";
 
-export type SessionState = "idle" | "connecting" | "listening" | "thinking" | "speaking";
+export type SessionState =
+  | "idle"
+  | "connecting"
+  | "listening"
+  | "thinking"
+  | "speaking";
 
 export type Turn = {
   id: string;
@@ -14,28 +15,20 @@ export type Turn = {
 };
 
 export type SessionEvents = {
-  onState: (s: SessionState) => void;
+  onState: (state: SessionState) => void;
   onTranscript: (turns: Turn[]) => void;
-  onError: (msg: string) => void;
-  /**
-   * Optional. Fires periodically while the agent is *audibly* speaking
-   * (above a silence threshold on the remote audio MediaStream). `activeMs`
-   * is the cumulative active-speech time for `itemId` so far, with silent
-   * gaps excluded — useful for driving a karaoke cursor that pauses with
-   * the agent. Resets to 0 when a new agent item starts speaking.
-   */
-  onAudioPulse?: (itemId: string, activeMs: number) => void;
+  onError: (message: string) => void;
 };
 
 type ServerEvent = {
   type: string;
-  // Common shapes — only the keys we care about.
   item_id?: string;
-  response_id?: string;
   delta?: string;
   transcript?: string;
+  call_id?: string;
+  name?: string;
+  arguments?: string;
   error?: { message?: string };
-  [k: string]: unknown;
 };
 
 export class RealtimeSession {
@@ -44,119 +37,80 @@ export class RealtimeSession {
   private mic: MediaStream | null = null;
   private audioEl: HTMLAudioElement | null = null;
   private turns: Turn[] = [];
-  private state: SessionState = "idle";
-  private events: SessionEvents;
-  private opts: RealtimeOptions;
-  // Tool calls collected during a response; flushed on response.done so we
-  // never race the response state machine.
   private pendingToolCalls: Array<{
     callId: string;
     name: string;
     args: string;
   }> = [];
-  // Web-Audio analyser tap on the remote stream. The realtime API exposes no
-  // audio↔text alignment events, so we measure actual playback ourselves and
-  // count active-speech ms per agent item — that drives the karaoke cursor.
-  private audioCtx: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private analyserBuf: Uint8Array | null = null;
-  private analyserTimer: number | null = null;
-  private currentSpeakingId: string | null = null;
-  private speechActiveMs = 0;
-  private lastAnalyserTickAt = 0;
 
-  constructor(events: SessionEvents, opts: RealtimeOptions = {}) {
-    this.events = events;
-    this.opts = opts;
-  }
+  constructor(private readonly events: SessionEvents) {}
 
   async start() {
     this.setState("connecting");
     try {
-      const session = await getRealtimeToken(this.opts);
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const clientSecret = await getRealtimeToken();
+      const mic = await this.requestMicrophone();
       this.mic = mic;
 
       const pc = new RTCPeerConnection();
       this.pc = pc;
-
-      // Remote audio playback. The element is created on the fly; iOS Safari
-      // requires it to be attached to the DOM and `playsInline` for autoplay
-      // to behave on the home-screen PWA.
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
       audioEl.setAttribute("playsinline", "");
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
       this.audioEl = audioEl;
-      pc.ontrack = (e) => {
-        audioEl.srcObject = e.streams[0];
-        // iOS Safari (esp. PWA mode) sometimes ignores autoplay even after
-        // a user gesture; calling play() explicitly here is harmless on
-        // platforms where it isn't needed.
-        audioEl.play().catch(() => {
-          /* ignore — autoplay may still kick in */
-        });
-        // Tap the same stream for analyser-based speech detection. Failures
-        // are non-fatal — the consumer's pulse callback simply won't fire
-        // and they should fall back to a timer.
-        if (this.events.onAudioPulse) this.setupAnalyser(e.streams[0]);
-      };
 
+      pc.ontrack = (event) => {
+        audioEl.srcObject = event.streams[0];
+        void audioEl.play().catch(() => undefined);
+      };
       for (const track of mic.getTracks()) pc.addTrack(track, mic);
-      // Start muted — push-to-talk style. UI tap unmutes when user is ready.
-      mic.getAudioTracks().forEach((t) => {
-        t.enabled = false;
+      mic.getAudioTracks().forEach((track) => {
+        track.enabled = false;
       });
 
       const dc = pc.createDataChannel("oai-events");
       this.dc = dc;
-      dc.onmessage = (e) => this.handleServerEvent(e.data);
-      // Connection is live; agent will only "hear" us when the mic is unmuted.
+      dc.onmessage = (event) => this.handleServerEvent(event.data);
       dc.onopen = () => this.setState("idle");
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      if (!offer.sdp) throw new Error("Der Browser konnte keine Sprachverbindung vorbereiten.");
 
-      const sdpRes = await fetch(
-        `https://api.openai.com/v1/realtime?model=${session.model}`,
-        {
-          method: "POST",
-          body: offer.sdp,
-          headers: {
-            Authorization: `Bearer ${session.token}`,
-            "Content-Type": "application/sdp",
-          },
+      const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+        method: "POST",
+        body: offer.sdp,
+        headers: {
+          Authorization: `Bearer ${clientSecret.token}`,
+          "Content-Type": "application/sdp",
         },
-      );
-      if (!sdpRes.ok) {
-        throw new Error(
-          `OpenAI SDP exchange failed: ${sdpRes.status} ${await sdpRes.text().catch(() => "")}`,
-        );
+      });
+      if (!response.ok) {
+        throw new Error("Die Sprachverbindung zu OpenAI konnte nicht aufgebaut werden.");
       }
 
-      const answerSdp = await sdpRes.text();
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-    } catch (err) {
-      this.events.onError(err instanceof Error ? err.message : String(err));
+      await pc.setRemoteDescription({
+        type: "answer",
+        sdp: await response.text(),
+      });
+    } catch (error) {
+      const message = toGermanError(error);
       this.stop();
-      throw err;
+      this.events.onError(message);
+      throw error;
     }
   }
 
   stop() {
-    this.teardownAnalyser();
     try {
       this.dc?.close();
-    } catch {
-      // ignore
-    }
-    try {
       this.pc?.close();
     } catch {
-      // ignore
+      // Bereits geschlossene Browser-Verbindungen sind unkritisch.
     }
-    this.mic?.getTracks().forEach((t) => t.stop());
+    this.mic?.getTracks().forEach((track) => track.stop());
     if (this.audioEl) {
       this.audioEl.srcObject = null;
       this.audioEl.remove();
@@ -169,25 +123,9 @@ export class RealtimeSession {
   }
 
   setMuted(muted: boolean) {
-    this.mic?.getAudioTracks().forEach((t) => {
-      t.enabled = !muted;
+    this.mic?.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
     });
-  }
-
-  /**
-   * Push new system instructions over the data channel without tearing the
-   * WebRTC session down. Used by the Spanish tutor when the user changes
-   * level or scenario mid-call so the connection — and the karaoke state —
-   * survive the swap.
-   */
-  updateInstructions(instructions: string) {
-    if (!this.dc || this.dc.readyState !== "open") return;
-    this.dc.send(
-      JSON.stringify({
-        type: "session.update",
-        session: { instructions },
-      }),
-    );
   }
 
   clearTranscript() {
@@ -195,88 +133,82 @@ export class RealtimeSession {
     this.events.onTranscript([]);
   }
 
-  private setState(s: SessionState) {
-    this.state = s;
-    this.events.onState(s);
+  private async requestMicrophone(): Promise<MediaStream> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Dein Browser unterstützt keinen Mikrofonzugriff.");
+    }
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        throw new Error(
+          "Der Mikrofonzugriff wurde abgelehnt. Erlaube ihn in den Website-Einstellungen.",
+        );
+      }
+      throw new Error("Das Mikrofon konnte nicht gestartet werden.");
+    }
+  }
+
+  private setState(state: SessionState) {
+    this.events.onState(state);
   }
 
   private handleServerEvent(raw: unknown) {
-    let evt: ServerEvent;
+    let event: ServerEvent;
     try {
-      evt = typeof raw === "string" ? JSON.parse(raw) : (raw as ServerEvent);
+      event = typeof raw === "string" ? JSON.parse(raw) : (raw as ServerEvent);
     } catch {
       return;
     }
 
-    switch (evt.type) {
+    switch (event.type) {
       case "input_audio_buffer.speech_started":
-        // user mic captured speech start. Move out of speaking → listening.
         this.setState("listening");
         break;
       case "input_audio_buffer.speech_stopped":
-        // committed; model will respond next.
         this.setState("thinking");
         break;
       case "conversation.item.input_audio_transcription.completed": {
-        const text = String(evt.transcript ?? "").trim();
-        if (text) this.appendTurn(String(evt.item_id ?? cryptoId()), "user", text, true);
+        const text = String(event.transcript ?? "").trim();
+        if (text) this.replaceTurn(event.item_id ?? cryptoId(), "user", text, true);
         break;
       }
-      case "response.created":
-        // Stay in thinking until we hear audio start.
-        break;
-      // Audio-output events have shifted names across API versions; accept any.
-      case "response.audio.delta":
-      case "response.audio.done":
       case "response.output_audio.delta":
-      case "response.output_audio.done":
-      case "response.output_audio_buffer.started": {
-        if (this.state !== "speaking") this.setState("speaking");
-        // Tag whichever item the analyser should credit active speech to.
-        // Audio events carry item_id; first delta for a new item resets the
-        // counter so a fresh agent turn starts at 0ms.
-        const itemId = String(evt.item_id ?? "");
-        if (itemId && itemId !== this.currentSpeakingId) {
-          this.currentSpeakingId = itemId;
-          this.speechActiveMs = 0;
-        }
+      case "response.output_audio_buffer.started":
+        this.setState("speaking");
         break;
-      }
+      case "response.output_audio_transcript.delta":
       case "response.audio_transcript.delta": {
-        const delta = String(evt.delta ?? "");
-        const itemId = String(evt.item_id ?? "");
-        if (delta && itemId) this.appendDelta(itemId, "agent", delta);
+        const delta = String(event.delta ?? "");
+        if (delta && event.item_id) this.appendDelta(event.item_id, "agent", delta);
         break;
       }
+      case "response.output_audio_transcript.done":
       case "response.audio_transcript.done": {
-        const text = String(evt.transcript ?? "").trim();
-        const itemId = String(evt.item_id ?? "");
-        if (text && itemId) this.replaceTurn(itemId, "agent", text, true);
+        const text = String(event.transcript ?? "").trim();
+        if (text && event.item_id) this.replaceTurn(event.item_id, "agent", text, true);
         break;
       }
-      case "response.function_call_arguments.done": {
-        const callId = String(evt.call_id ?? "");
-        const name = String(evt.name ?? "");
-        const args = String(evt.arguments ?? "{}");
-        if (callId && name) this.pendingToolCalls.push({ callId, name, args });
-        break;
-      }
-      case "response.done":
-        if (this.pendingToolCalls.length > 0) {
-          // fire and forget — flushPendingTools sends events back through dc
-          // and triggers a new response.create when results land.
-          void this.flushPendingTools();
-        } else {
-          // agent done speaking — back to idle. UI shows "Listening" if mic
-          // is unmuted, "Tap to talk" if muted.
-          this.setState("idle");
+      case "response.function_call_arguments.done":
+        if (event.call_id && event.name) {
+          this.pendingToolCalls.push({
+            callId: event.call_id,
+            name: event.name,
+            args: event.arguments ?? "{}",
+          });
         }
         break;
-      case "error": {
-        const msg = evt.error?.message ?? "unknown realtime error";
-        this.events.onError(msg);
+      case "response.done":
+        if (this.pendingToolCalls.length) void this.flushPendingTools();
+        else this.setState("idle");
         break;
-      }
+      case "error":
+        this.events.onError(
+          event.error?.message
+            ? "Die Sprachsitzung wurde unterbrochen. Bitte starte sie erneut."
+            : "In der Sprachsitzung ist ein Fehler aufgetreten.",
+        );
+        break;
       default:
         break;
     }
@@ -288,17 +220,16 @@ export class RealtimeSession {
       this.setState("idle");
       return;
     }
-    const batch = this.pendingToolCalls.splice(0);
-    // Stay in thinking while tool executes.
+    const calls = this.pendingToolCalls.splice(0);
     this.setState("thinking");
-    for (const call of batch) {
+
+    for (const call of calls) {
       let output: string;
       try {
-        const args = JSON.parse(call.args || "{}") as Record<string, unknown>;
-        const res = await executeVoiceTool(call.name, args);
-        output = res.output;
-      } catch (err) {
-        output = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+        const args = JSON.parse(call.args) as Record<string, unknown>;
+        output = (await executeVoiceTool(call.name, args)).output;
+      } catch {
+        output = "Das angeforderte Werkzeug konnte nicht ausgeführt werden.";
       }
       this.dc.send(
         JSON.stringify({
@@ -311,112 +242,11 @@ export class RealtimeSession {
         }),
       );
     }
-    // Ask the model to continue now that tool outputs are in scope.
     this.dc.send(JSON.stringify({ type: "response.create" }));
   }
 
-  /**
-   * Tap the remote audio MediaStream with an AnalyserNode and start a
-   * sampling loop that credits "active speech ms" to the current agent item.
-   *
-   * Notes:
-   *  - Chromium needs the analyser graph to be pulled by something downstream
-   *    of the MediaStreamSource or it returns silence; a zero-gain connection
-   *    to `ctx.destination` provides that pull without doubling audio output
-   *    (the <audio> element is still the actual sink).
-   *  - The AudioContext may start `suspended` under autoplay policy; we
-   *    `resume()` and ignore the rejection — the orb tap that started the
-   *    session counts as a user gesture and unsuspends it eventually.
-   */
-  private setupAnalyser(stream: MediaStream) {
-    if (this.audioCtx) return;
-    try {
-      const Ctx =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = new Ctx();
-      ctx.resume().catch(() => {
-        /* ignore */
-      });
-
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      const muteGain = ctx.createGain();
-      muteGain.gain.value = 0;
-      source.connect(analyser);
-      analyser.connect(muteGain);
-      muteGain.connect(ctx.destination);
-
-      this.audioCtx = ctx;
-      this.analyser = analyser;
-      this.analyserBuf = new Uint8Array(analyser.frequencyBinCount);
-      this.lastAnalyserTickAt = performance.now();
-
-      // ~50ms tick — fast enough to feel real-time, cheap enough to ignore.
-      this.analyserTimer = window.setInterval(() => this.analyserTick(), 50);
-    } catch (err) {
-      console.warn("[realtime] analyser setup failed:", err);
-    }
-  }
-
-  private analyserTick() {
-    if (!this.analyser || !this.analyserBuf || !this.events.onAudioPulse) return;
-    // PCM time-domain samples in [0, 255], 128 = silence baseline.
-    const buf = this.analyserBuf as Uint8Array;
-    this.analyser.getByteTimeDomainData(buf as unknown as Uint8Array<ArrayBuffer>);
-    let sumSq = 0;
-    for (let i = 0; i < buf.length; i++) {
-      const v = buf[i] - 128;
-      sumSq += v * v;
-    }
-    const rms = Math.sqrt(sumSq / buf.length);
-
-    const now = performance.now();
-    const elapsed = now - this.lastAnalyserTickAt;
-    this.lastAnalyserTickAt = now;
-
-    // Threshold tuned empirically against gpt-realtime "verse" output. Below
-    // this is room noise / between-word silence; above this is voiced audio.
-    const SILENCE_RMS = 3;
-    if (rms > SILENCE_RMS && this.currentSpeakingId) {
-      this.speechActiveMs += elapsed;
-      this.events.onAudioPulse(this.currentSpeakingId, this.speechActiveMs);
-    }
-  }
-
-  private teardownAnalyser() {
-    if (this.analyserTimer !== null) {
-      clearInterval(this.analyserTimer);
-      this.analyserTimer = null;
-    }
-    try {
-      this.audioCtx?.close();
-    } catch {
-      // ignore
-    }
-    this.audioCtx = null;
-    this.analyser = null;
-    this.analyserBuf = null;
-    this.currentSpeakingId = null;
-    this.speechActiveMs = 0;
-  }
-
-  private appendTurn(id: string, role: Turn["role"], text: string, done: boolean) {
-    const existing = this.turns.find((t) => t.id === id);
-    if (existing) {
-      existing.text = text;
-      existing.done = done;
-    } else {
-      this.turns.push({ id, role, text, done });
-    }
-    this.events.onTranscript([...this.turns]);
-  }
-
   private appendDelta(id: string, role: Turn["role"], delta: string) {
-    const existing = this.turns.find((t) => t.id === id);
+    const existing = this.turns.find((turn) => turn.id === id);
     if (existing) {
       existing.text += delta;
     } else {
@@ -426,17 +256,19 @@ export class RealtimeSession {
   }
 
   private replaceTurn(id: string, role: Turn["role"], text: string, done: boolean) {
-    const existing = this.turns.find((t) => t.id === id);
-    if (existing) {
-      existing.text = text;
-      existing.done = done;
-    } else {
-      this.turns.push({ id, role, text, done });
-    }
+    const index = this.turns.findIndex((turn) => turn.id === id);
+    const turn = { id, role, text, done };
+    if (index >= 0) this.turns[index] = turn;
+    else this.turns.push(turn);
     this.events.onTranscript([...this.turns]);
   }
 }
 
+function toGermanError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return "Die Sprachfunktion konnte nicht gestartet werden.";
+}
+
 function cryptoId(): string {
-  return `id-${Math.random().toString(36).slice(2, 10)}`;
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }

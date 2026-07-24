@@ -83,9 +83,9 @@ export function VaultPage() {
         setScopes(s.scopes.filter((x) => x !== ""));
         setSchedules(sch.schedules);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
-        setScopesError(err instanceof Error ? err.message : String(err));
+        setScopesError("Notizen konnten nicht geladen werden.");
       });
     return () => {
       cancelled = true;
@@ -104,9 +104,9 @@ export function VaultPage() {
         setFiles(res.files);
         setFilesLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
-        setFilesError(err instanceof Error ? err.message : String(err));
+        setFilesError("Die Dateien konnten nicht geladen werden.");
         setFilesLoading(false);
       });
     return () => {
@@ -126,9 +126,9 @@ export function VaultPage() {
         setFile(f);
         setFileLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
-        setFileError(err instanceof Error ? err.message : String(err));
+        setFileError("Die Notiz konnte nicht geöffnet werden.");
         setFileLoading(false);
       });
     return () => {
@@ -195,9 +195,9 @@ function Topbar({ view, setView }: { view: View; setView: (v: View) => void }) {
       <div className="topbar">
         <div className="topbar-title">
           <span className="dot" />
-          Vault
+          Notizen
         </div>
-        <button className="topbar-action" title="More">
+        <button className="topbar-action" title="Weitere Optionen">
           <Icon name="more" size={18} />
         </button>
       </div>
@@ -218,7 +218,7 @@ function Topbar({ view, setView }: { view: View; setView: (v: View) => void }) {
     title = basename(view.relPath);
     onBack = () => setView({ kind: "files", scope: view.backScope });
   } else if (view.kind === "scheduled-list") {
-    title = "Scheduled";
+    title = "Geplant";
   } else if (view.kind === "scheduled-reader") {
     title = view.schedule.name;
     onBack = () => setView({ kind: "scheduled-list" });
@@ -227,14 +227,14 @@ function Topbar({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
     <div className="topbar">
       <div className="topbar-back">
-        <button className="back-btn" onClick={onBack} aria-label="Back">
+        <button className="back-btn" onClick={onBack} aria-label="Zurück">
           <Icon name="chevron-left" size={20} />
         </button>
         <div className="topbar-title" title={title}>
           {title}
         </div>
       </div>
-      <button className="topbar-action" title="More">
+      <button className="topbar-action" title="Weitere Optionen">
         <Icon name="more" size={18} />
       </button>
     </div>
@@ -258,7 +258,7 @@ function BrowseView({
     <div className="vault-body">
       <div className="file-list">
         {scopesError && <Empty danger>{scopesError}</Empty>}
-        {!scopesError && groups.length === 0 && <Empty>loading…</Empty>}
+        {!scopesError && groups.length === 0 && <Empty>Wird geladen…</Empty>}
         {groups.map((g) => (
           <NavRow
             key={g.name}
@@ -266,16 +266,16 @@ function BrowseView({
             name={g.name}
             meta={
               g.isLeaf
-                ? "leaf scope"
-                : `${g.scopes.length} scope${g.scopes.length === 1 ? "" : "s"}`
+                ? "Notizbereich"
+                : `${g.scopes.length} Bereiche`
             }
             onClick={() => onPickGroup(g)}
           />
         ))}
         <NavRow
           icon="scheduled"
-          name="Scheduled"
-          meta={`${scheduleCount} schedule${scheduleCount === 1 ? "" : "s"}`}
+          name="Geplant"
+          meta={`${scheduleCount} Zeitpläne`}
           special
           onClick={onPickScheduled}
         />
@@ -296,7 +296,7 @@ function GroupView({
   return (
     <div className="vault-body">
       <div className="file-list">
-        {scopes.length === 0 && <Empty>no scopes in {group}</Empty>}
+        {scopes.length === 0 && <Empty>Keine Bereiche in {group}</Empty>}
         {scopes.map((s) => (
           <NavRow
             key={s}
@@ -326,10 +326,10 @@ function FilesView({
   return (
     <div className="vault-body">
       <div className="file-list">
-        {loading && <Empty>loading {scope}…</Empty>}
+        {loading && <Empty>{scope} wird geladen…</Empty>}
         {error && <Empty danger>{error}</Empty>}
         {!loading && !error && files.length === 0 && (
-          <Empty>empty scope · no files</Empty>
+          <Empty>Dieser Bereich enthält noch keine Dateien.</Empty>
         )}
         {files.map((f) => (
           <div
@@ -362,7 +362,7 @@ function ReaderView({
 }) {
   return (
     <div className="reader">
-      {loading && <Empty>loading…</Empty>}
+      {loading && <Empty>Wird geladen…</Empty>}
       {error && <Empty danger>{error}</Empty>}
       {file && <FileBody file={file} />}
     </div>
@@ -388,10 +388,10 @@ function FileBody({ file }: { file: VaultFile }) {
       <div className="subtitle">{file.relPath}</div>
       <div className="reader-actions">
         <button className="btn">
-          <Icon name="merge" size={12} /> Promote to canonical
+          <Icon name="merge" size={12} /> Als Hauptnotiz übernehmen
         </button>
         <button className="btn ghost">
-          <Icon name="more" size={12} /> Actions
+          <Icon name="more" size={12} /> Aktionen
         </button>
       </div>
       <div
@@ -412,7 +412,7 @@ function ScheduledListView({
   return (
     <div className="vault-body">
       <div className="file-list">
-        {schedules.length === 0 && <Empty>no schedules yet</Empty>}
+        {schedules.length === 0 && <Empty>Noch keine Zeitpläne vorhanden.</Empty>}
         {schedules.map((s) => (
           <div key={s._id} className="file-row" onClick={() => onPick(s)}>
             <div style={{ display: "flex", flex: 1, minWidth: 0 }}>
@@ -426,7 +426,7 @@ function ScheduledListView({
               </div>
             </div>
             <div className="file-time">
-              {s.active ? relativeFuture(s.nextRunAt) : "paused"}
+              {s.active ? relativeFuture(s.nextRunAt) : "pausiert"}
             </div>
           </div>
         ))}
@@ -443,36 +443,36 @@ function ScheduleReader({ schedule }: { schedule: ScheduleRow }) {
       <dl className="frontmatter">
         <dt>cron</dt>
         <dd>{schedule.cron}</dd>
-        <dt>scope</dt>
+        <dt>Bereich</dt>
         <dd>{schedule.contextScope ?? "(none)"}</dd>
-        <dt>active</dt>
-        <dd>{schedule.active ? "yes" : "paused"}</dd>
-        <dt>next</dt>
+        <dt>Aktiv</dt>
+        <dd>{schedule.active ? "yes" : "pausiert"}</dd>
+        <dt>Nächster Lauf</dt>
         <dd>{next.toLocaleString()}</dd>
         {lastRun && (
           <>
-            <dt>last_run</dt>
+            <dt>Letzter Lauf</dt>
             <dd>{lastRun.toLocaleString()}</dd>
           </>
         )}
       </dl>
       <h1>{schedule.name}</h1>
       <div className="subtitle">
-        scheduled · {schedule.type} · output to Scheduled/{schedule.slug}/
+        geplant · {schedule.type} · Ausgabe nach Geplant/{schedule.slug}/
       </div>
       <div className="reader-actions">
         <button className="btn primary">
-          <Icon name="play" size={12} /> Run now
+          <Icon name="play" size={12} /> Jetzt ausführen
         </button>
         <button className="btn">
           <Icon name={schedule.active ? "pause" : "play"} size={12} />{" "}
-          {schedule.active ? "Pause" : "Resume"}
+          {schedule.active ? "Pausieren" : "Fortsetzen"}
         </button>
         <button className="btn ghost">
-          <Icon name="x" size={12} /> Delete
+          <Icon name="x" size={12} /> Löschen
         </button>
       </div>
-      <h2>Spec</h2>
+      <h2>Auftrag</h2>
       <p>{schedule.spec}</p>
     </div>
   );
@@ -552,7 +552,7 @@ function formatBytes(n: number): string {
 
 function relativeTime(ms: number): string {
   const diff = Date.now() - ms;
-  if (diff < 60_000) return "now";
+  if (diff < 60_000) return "jetzt";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
   if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d`;
@@ -562,7 +562,7 @@ function relativeTime(ms: number): string {
 
 function relativeFuture(ms: number): string {
   const diff = ms - Date.now();
-  if (diff < 0) return "due";
+  if (diff < 0) return "fällig";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
   return `${Math.floor(diff / 86_400_000)}d`;
