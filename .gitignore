@@ -8,6 +8,9 @@
 
 # Node / Convex
 node_modules/
+web/android/.gradle/
+web/android/app/build/
+web/android/build/
 .convex/
 convex/_generated/
 npm-debug.log*
