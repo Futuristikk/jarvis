@@ -10,7 +10,7 @@ import { voice } from "./routes/voice.js";
 
 const app = new Hono();
 
-const configuredOrigin = process.env.JARVIS_ORIGIN?.replace(/\\/+$/, "");
+const configuredOrigin = process.env.JARVIS_ORIGIN?.replace(/\/+$/, "");
 
 const allowedOrigins = new Set([
   "http://localhost:5173",
