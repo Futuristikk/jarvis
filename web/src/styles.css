@@ -1224,3 +1224,57 @@ input, textarea { font-family: inherit; color: inherit; }
   color: var(--danger);
   border: 1px solid rgba(226, 106, 90, 0.35);
 }
+
+.device-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.device-actions button,
+.device-selection button {
+  min-height: 48px;
+  border: 1px solid rgba(255, 181, 71, 0.35);
+  border-radius: 12px;
+  padding: 0 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.device-actions button:disabled {
+  opacity: 0.55;
+}
+
+.device-selection {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.device-selection img {
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.device-selection > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.device-selection button {
+  margin-top: 8px;
+}
+
+.visually-hidden {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}

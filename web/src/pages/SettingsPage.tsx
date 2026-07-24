@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { setToken } from "../auth";
+import { DeviceAccessCard } from "../components/DeviceAccessCard";
 import { isNativeApp, openWebSearch, openWhatsApp, shareJarvis } from "../native";
 
 export function SettingsPage() {
@@ -56,6 +57,7 @@ export function SettingsPage() {
           </div>
           {actionError && <p className="surface-error">{actionError}</p>}
         </section>
+        <DeviceAccessCard />
         <section className="surface-card">
           <strong>Sicherheit</strong>
           <p>
