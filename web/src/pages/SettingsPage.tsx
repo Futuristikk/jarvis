@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { setToken } from "../auth";
+import { CalendarAccessCard } from "../components/CalendarAccessCard";
 import { ContactAccessCard } from "../components/ContactAccessCard";
 import { DeviceAccessCard } from "../components/DeviceAccessCard";
 import { LocationAccessCard } from "../components/LocationAccessCard";
@@ -62,6 +63,7 @@ export function SettingsPage() {
         <DeviceAccessCard />
         <LocationAccessCard />
         <ContactAccessCard />
+        <CalendarAccessCard />
         <section className="surface-card">
           <strong>Sicherheit</strong>
           <p>
