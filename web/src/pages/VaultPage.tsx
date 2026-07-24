@@ -83,7 +83,7 @@ export function VaultPage() {
         setScopes(s.scopes.filter((x) => x !== ""));
         setSchedules(sch.schedules);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
         setScopesError("Notizen konnten nicht geladen werden.");
       });
@@ -104,7 +104,7 @@ export function VaultPage() {
         setFiles(res.files);
         setFilesLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
         setFilesError("Die Dateien konnten nicht geladen werden.");
         setFilesLoading(false);
@@ -126,7 +126,7 @@ export function VaultPage() {
         setFile(f);
         setFileLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
         setFileError("Die Notiz konnte nicht geöffnet werden.");
         setFileLoading(false);
