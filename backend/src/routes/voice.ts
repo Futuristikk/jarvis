@@ -6,7 +6,7 @@ const REALTIME_MODEL =
 const REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE ?? "marin";
 const OPENAI_BASE_URL = (
   process.env.OPENAI_BASE_URL ?? "https://api.openai.com"
-).replace(/\\/+$/, "");
+).replace(/\/+$/, "");
 const CLIENT_SECRET_TTL_SECONDS = 600;
 const VAULT_SCOPE_CAP_BYTES = 32_000;
 
