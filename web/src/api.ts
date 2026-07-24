@@ -263,25 +263,10 @@ export type RealtimeToken = {
   model: string;
 };
 
-export type RealtimeMode = "jarvis" | "spanish";
-
-export type RealtimeOptions = {
-  mode?: RealtimeMode;
-  level?: string;
-  scenario?: string;
-};
-
-export async function getRealtimeToken(opts: RealtimeOptions = {}) {
+export async function getRealtimeToken() {
   return jsonFetch<RealtimeToken>("/voice/realtime-token", {
     method: "POST",
-    body: JSON.stringify(opts),
-  });
-}
-
-export async function getRealtimeInstructions(opts: RealtimeOptions = {}) {
-  return jsonFetch<{ instructions: string }>("/voice/instructions", {
-    method: "POST",
-    body: JSON.stringify(opts),
+    body: "{}",
   });
 }
 
