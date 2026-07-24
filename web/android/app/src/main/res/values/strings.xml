@@ -4,4 +4,6 @@
     <string name="title_activity_main">Jarvis</string>
     <string name="package_name">ch.jarvis.assistant</string>
     <string name="custom_url_scheme">ch.jarvis.assistant</string>
+    <string name="assistant_service_label">Jarvis – deutscher Assistent</string>
+    <string name="recognition_service_label">Jarvis-Spracherkennung</string>
 </resources>
