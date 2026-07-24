@@ -2,13 +2,18 @@ package ch.jarvis.assistant;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.RemoteException;
 import android.speech.RecognitionService;
 import android.speech.SpeechRecognizer;
 
 public class JarvisRecognitionService extends RecognitionService {
     @Override
     protected void onStartListening(Intent recognizerIntent, Callback listener) {
-        listener.error(SpeechRecognizer.ERROR_CLIENT);
+        try {
+            listener.error(SpeechRecognizer.ERROR_CLIENT);
+        } catch (RemoteException ignored) {
+            // Der anfragende Prozess wurde bereits beendet.
+        }
     }
 
     @Override
@@ -18,6 +23,10 @@ public class JarvisRecognitionService extends RecognitionService {
 
     @Override
     protected void onStopListening(Callback listener) {
-        listener.results(new Bundle());
+        try {
+            listener.results(new Bundle());
+        } catch (RemoteException ignored) {
+            // Der anfragende Prozess wurde bereits beendet.
+        }
     }
 }
