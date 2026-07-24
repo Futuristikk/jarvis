@@ -37,7 +37,6 @@ export class RealtimeSession {
   private mic: MediaStream | null = null;
   private audioEl: HTMLAudioElement | null = null;
   private turns: Turn[] = [];
-  private state: SessionState = "idle";
   private pendingToolCalls: Array<{
     callId: string;
     name: string;
@@ -151,7 +150,6 @@ export class RealtimeSession {
   }
 
   private setState(state: SessionState) {
-    this.state = state;
     this.events.onState(state);
   }
 
