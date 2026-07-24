@@ -19,6 +19,21 @@ type ContactPickerPlugin = {
 
 const ContactPicker = registerPlugin<ContactPickerPlugin>("ContactPicker");
 
+export type CalendarEventDraft = {
+  title: string;
+  startTime: number;
+  endTime: number;
+  location?: string;
+  description?: string;
+};
+
+type CalendarIntentPlugin = {
+  prepareEvent(draft: CalendarEventDraft): Promise<{ opened: boolean }>;
+};
+
+const CalendarIntent =
+  registerPlugin<CalendarIntentPlugin>("CalendarIntent");
+
 export type PhoneContact = {
   name: string;
   phone: string;
@@ -26,6 +41,31 @@ export type PhoneContact = {
 
 export function isNativeApp() {
   return Capacitor.isNativePlatform();
+}
+
+export async function openCalendarEventDraft(draft: CalendarEventDraft) {
+  if (!Capacitor.isNativePlatform()) {
+    throw new Error(
+      "Die Kalenderübergabe ist nur in der installierten Android-App verfügbar.",
+    );
+  }
+  if (!draft.title.trim()) {
+    throw new Error("Der Termin benötigt einen Titel.");
+  }
+  if (
+    !Number.isFinite(draft.startTime) ||
+    !Number.isFinite(draft.endTime) ||
+    draft.endTime <= draft.startTime
+  ) {
+    throw new Error("Die Endzeit muss nach der Startzeit liegen.");
+  }
+
+  await CalendarIntent.prepareEvent({
+    ...draft,
+    title: draft.title.trim(),
+    location: draft.location?.trim() || undefined,
+    description: draft.description?.trim() || undefined,
+  });
 }
 
 export async function pickPhoneContact(): Promise<PhoneContact | null> {
