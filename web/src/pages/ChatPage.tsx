@@ -48,7 +48,7 @@ export function ChatPage() {
           <span className="dot" />
           Jarvis
         </div>
-        <span className="chat-status">Deutsch · online</span>
+        <span className="chat-status">Deutsch · bereit</span>
       </div>
 
       <div className="chat-messages" aria-live="polite">
