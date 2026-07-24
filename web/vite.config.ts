@@ -11,7 +11,8 @@ export default defineConfig({
       manifest: {
         name: "Jarvis",
         short_name: "Jarvis",
-        description: "Personal AI agent",
+        description: "Persönlicher deutschsprachiger Assistent",
+        lang: "de",
         theme_color: "#0b0b0c",
         background_color: "#0b0b0c",
         display: "standalone",
