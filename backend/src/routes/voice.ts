@@ -4,6 +4,9 @@ import { listScopes, readScopeContext } from "../vaultClient.js";
 const REALTIME_MODEL =
   process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime";
 const REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE ?? "marin";
+const OPENAI_BASE_URL = (
+  process.env.OPENAI_BASE_URL ?? "https://api.openai.com"
+).replace(/\\/+$/, "");
 const CLIENT_SECRET_TTL_SECONDS = 600;
 const VAULT_SCOPE_CAP_BYTES = 32_000;
 
@@ -46,7 +49,7 @@ voice.post("/realtime-token", async (c) => {
 
   const instructions = await buildJarvisInstructions();
   const response = await fetch(
-    "https://api.openai.com/v1/realtime/client_secrets",
+    `${OPENAI_BASE_URL}/v1/realtime/client_secrets`,
     {
       method: "POST",
       headers: {
