@@ -7,7 +7,7 @@ import {
 } from "../voice/realtimeSession";
 
 export function VoicePage() {
-  const [state, setState] = useState<SessionState>("connecting");
+  const [state, setState] = useState<SessionState>("idle");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [muted, setMuted] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -15,27 +15,8 @@ export function VoicePage() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<RealtimeSession | null>(null);
 
-  // Auto-connect when the Voice page mounts; tear down on unmount so leaving
-  // the tab fully releases the mic and the WebRTC peer connection.
   useEffect(() => {
-    let disposed = false;
-    const session = new RealtimeSession({
-      onState: (s) => {
-        if (!disposed) setState(s);
-      },
-      onTranscript: (t) => {
-        if (!disposed) setTurns(t);
-      },
-      onError: (msg) => {
-        if (!disposed) setError(msg);
-      },
-    });
-    sessionRef.current = session;
-    session.start().catch(() => {
-      sessionRef.current = null;
-    });
     return () => {
-      disposed = true;
       sessionRef.current?.stop();
       sessionRef.current = null;
     };
@@ -47,57 +28,87 @@ export function VoicePage() {
     }
   }, [turns]);
 
-  const toggleMic = () => {
-    if (!sessionRef.current) return;
+  async function startSession() {
+    if (sessionRef.current || state === "connecting") return;
+    setError(null);
+    const session = new RealtimeSession({
+      onState: setState,
+      onTranscript: setTurns,
+      onError: setError,
+    });
+    sessionRef.current = session;
+    try {
+      await session.start();
+      session.setMuted(false);
+      setMuted(false);
+    } catch {
+      sessionRef.current = null;
+      setMuted(true);
+    }
+  }
+
+  function toggleMic() {
+    if (!sessionRef.current) {
+      void startSession();
+      return;
+    }
     setError(null);
     const next = !muted;
     setMuted(next);
     sessionRef.current.setMuted(next);
-  };
+  }
 
-  const clearTranscript = () => {
+  function clearTranscript() {
     sessionRef.current?.clearTranscript();
     setTurns([]);
-  };
+  }
 
-  // The agent's session state and the local mute state are orthogonal.
-  // Compose them for display:
-  //  - connecting → orb in "thinking" pulse
-  //  - agent speaking/thinking → reflect agent state regardless of mic
-  //  - otherwise → muted = "idle" visual, unmuted = "listening" (mic hot)
   let orbState: "idle" | "listening" | "thinking" | "speaking";
-  if (state === "connecting") orbState = "thinking";
+  if (state === "connecting" || state === "thinking") orbState = "thinking";
   else if (state === "speaking") orbState = "speaking";
-  else if (state === "thinking") orbState = "thinking";
   else orbState = muted ? "idle" : "listening";
 
-  let stateLabel: string;
-  if (state === "connecting") stateLabel = "Connecting…";
-  else if (state === "speaking") stateLabel = "Speaking";
-  else if (state === "thinking") stateLabel = "Thinking";
-  else if (muted) stateLabel = "Tap to talk";
-  else stateLabel = "Listening";
-
-  const connected = state !== "connecting";
+  const stateLabel =
+    state === "connecting"
+      ? "Verbindung wird hergestellt…"
+      : state === "speaking"
+        ? "Jarvis spricht"
+        : state === "thinking"
+          ? "Jarvis denkt nach"
+          : muted
+            ? sessionRef.current
+              ? "Tippen zum Sprechen"
+              : "Tippen zum Starten"
+            : "Jarvis hört zu";
 
   return (
     <div className="page page-enter">
       <div className="topbar">
         <div className="topbar-title">
           <span className="dot" />
-          Jarvis · Voice
+          Jarvis · Sprache
         </div>
         <button
           className="topbar-action"
           onClick={() => setSheetOpen(true)}
-          title="Context"
+          aria-label="Informationen zur Sprachfunktion"
         >
           <Icon name="info" size={18} />
         </button>
       </div>
 
       <div className="orb-stage">
-        <div className="orb" data-state={orbState} onClick={toggleMic}>
+        <div
+          className="orb"
+          data-state={orbState}
+          onClick={toggleMic}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") toggleMic();
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label={muted ? "Mikrofon starten" : "Mikrofon stummschalten"}
+        >
           <div className="orb-pulse" />
           <div className="orb-pulse delay" />
           <div className="orb-rim" />
@@ -105,61 +116,33 @@ export function VoicePage() {
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <div className="voice-state">
         <div className={"orb-state-label " + (orbState === "idle" ? "idle" : "")}>
           <span className="live" />
           {stateLabel}
         </div>
-        <div
-          className={
-            "waveform " + (!muted && orbState !== "idle" ? "" : "silent")
-          }
-        >
-          {Array.from({ length: 9 }).map((_, i) => (
-            <span key={i} className="bar" />
+        <div className={"waveform " + (muted ? "silent" : "")}>
+          {Array.from({ length: 9 }).map((_, index) => (
+            <span key={index} className="bar" />
           ))}
         </div>
       </div>
 
-      {error && (
-        <div
-          style={{
-            margin: "0 20px 8px",
-            padding: "8px 12px",
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            background: "var(--bg-1)",
-            color: "var(--danger)",
-            fontFamily: "var(--mono)",
-            fontSize: 11,
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {error && <div className="voice-error">{error}</div>}
 
       <div className="transcript" ref={transcriptRef}>
         {turns.length === 0 && state !== "connecting" && (
-          <div
-            style={{
-              color: "var(--text-mute)",
-              fontFamily: "var(--mono)",
-              fontSize: 11,
-              padding: "20px 0",
-              textAlign: "center",
-              letterSpacing: "0.04em",
-            }}
-          >
-            tap the orb to open the mic · tap again to mute
+          <div className="voice-empty">
+            Tippe auf den Orb und sprich mit Jarvis auf Deutsch.
           </div>
         )}
-        {turns.map((t) => (
-          <div key={t.id} className={"turn " + t.role}>
+        {turns.map((turn) => (
+          <div key={turn.id} className={"turn " + turn.role}>
             <div className="turn-meta">
-              {t.role === "user" ? "you" : "jarvis"}
-              {!t.done && " · …"}
+              {turn.role === "user" ? "Du" : "Jarvis"}
+              {!turn.done && " · …"}
             </div>
-            <div className="turn-text">{t.text}</div>
+            <div className="turn-text">{turn.text}</div>
           </div>
         ))}
       </div>
@@ -168,79 +151,51 @@ export function VoicePage() {
         <button
           className={"icon-btn " + (!muted ? "active" : "")}
           onClick={toggleMic}
-          disabled={!connected}
-          title={muted ? "Open mic" : "Mute"}
+          disabled={state === "connecting"}
+          aria-label={muted ? "Mikrofon einschalten" : "Mikrofon stummschalten"}
         >
           <Icon name={muted ? "mic-off" : "mic"} size={16} />
         </button>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontFamily: "var(--mono)",
-            fontSize: 10,
-            color: "var(--text-mute)",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-          }}
-        >
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: "50%",
-              background: !connected
-                ? "var(--accent)"
-                : muted
-                  ? "var(--text-mute)"
-                  : "var(--ok)",
-            }}
-          />
-          {!connected
-            ? "connecting"
-            : muted
-              ? "WebRTC · muted"
-              : "WebRTC · live"}
+        <div className="voice-connection">
+          <span className={state === "connecting" ? "connecting" : !muted ? "live" : ""} />
+          {state === "connecting"
+            ? "Verbindet"
+            : sessionRef.current
+              ? muted
+                ? "WebRTC · stumm"
+                : "WebRTC · aktiv"
+              : "Noch nicht gestartet"}
         </div>
         <button
           className="icon-btn"
           onClick={clearTranscript}
           disabled={turns.length === 0}
-          title="Clear transcript"
+          aria-label="Verlauf löschen"
         >
           <Icon name="x" size={16} />
         </button>
       </div>
 
-      {sheetOpen && <ContextSheet onClose={() => setSheetOpen(false)} />}
+      {sheetOpen && <VoiceInfo onClose={() => setSheetOpen(false)} />}
     </div>
   );
 }
 
-function ContextSheet({ onClose }: { onClose: () => void }) {
+function VoiceInfo({ onClose }: { onClose: () => void }) {
   return (
     <Fragment>
       <div className="sheet-backdrop" onClick={onClose} />
       <div className="sheet">
         <div className="sheet-handle" />
-        <h3>How voice works</h3>
-        <p
-          className="text-mute"
-          style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}
-        >
-          The connection opens automatically when you land on this tab. Tap
-          the orb to open the mic, tap again to mute. Jarvis only "hears" you
-          while the mic is open, so ambient noise won't interrupt his replies.
+        <h3>So funktioniert Sprache</h3>
+        <p className="text-mute">
+          Erst dein Tippen auf den Orb startet Mikrofon und Verbindung. Tippe
+          erneut, um das Mikrofon stummzuschalten.
         </p>
-        <h3>What he knows</h3>
-        <p
-          className="text-mute"
-          style={{ fontSize: 13, lineHeight: 1.5 }}
-        >
-          The current time, your vault scope list, and (when you ask about
-          one) the canonical notes inside that scope. Calendar awareness
-          comes next.
+        <h3>Datenschutz</h3>
+        <p className="text-mute">
+          Der OpenAI-Schlüssel bleibt im Backend. Dein Browser erhält nur einen
+          kurzlebigen Schlüssel für diese Sprachsitzung.
         </p>
       </div>
     </Fragment>
