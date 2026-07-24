@@ -19,6 +19,13 @@ type ContactPickerPlugin = {
 
 const ContactPicker = registerPlugin<ContactPickerPlugin>("ContactPicker");
 
+type MicrophonePermissionPlugin = {
+  requestAccess(): Promise<{ granted: boolean }>;
+};
+
+const MicrophonePermission =
+  registerPlugin<MicrophonePermissionPlugin>("MicrophonePermission");
+
 export type CalendarEventDraft = {
   title: string;
   startTime: number;
@@ -41,6 +48,17 @@ export type PhoneContact = {
 
 export function isNativeApp() {
   return Capacitor.isNativePlatform();
+}
+
+export async function requestMicrophoneAccess() {
+  if (!Capacitor.isNativePlatform()) return;
+
+  const result = await MicrophonePermission.requestAccess();
+  if (!result.granted) {
+    throw new Error(
+      "Der Mikrofonzugriff wurde für Jarvis abgelehnt. Erlaube das Mikrofon in den Android-App-Einstellungen unter Berechtigungen.",
+    );
+  }
 }
 
 export async function openCalendarEventDraft(draft: CalendarEventDraft) {
