@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ContactPickerPlugin.class);
+        registerPlugin(CalendarIntentPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
