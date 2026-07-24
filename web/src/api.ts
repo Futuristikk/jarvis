@@ -2,7 +2,9 @@ import { getToken, setToken } from "./auth";
 
 const BASE =
   import.meta.env.VITE_BACKEND_URL ??
-  `${window.location.protocol}//${window.location.hostname}:3000`;
+  window.location.origin;
+
+const API_BASE = `${BASE}/api`;
 
 export type TaskStatus =
   | "queued"
@@ -74,7 +76,7 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   };
   if (token) headers["authorization"] = `Bearer ${token}`;
 
-  const r = await fetch(`${BASE}${path}`, { ...init, headers });
+  const r = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (r.status === 401) {
     setToken(null);
     throw new Error("unauthorized");
@@ -87,19 +89,26 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function verifyPassword(password: string): Promise<boolean> {
-  const r = await fetch(`${BASE}/health`, {
+  const r = await fetch(`${API_BASE}/auth/verify`, {
     headers: { authorization: `Bearer ${password}` },
   });
-  if (!r.ok) return false;
-  // /health is public, so we need a real auth-required probe.
-  const r2 = await fetch(`${BASE}/vault/scopes`, {
-    headers: { authorization: `Bearer ${password}` },
-  });
-  return r2.ok;
+  return r.ok;
 }
 
 export async function getHealth() {
   return jsonFetch<{ ok: boolean; service: string; time: string }>("/health");
+}
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export async function sendChat(messages: ChatMessage[]) {
+  return jsonFetch<{ reply: string; model: string }>("/chat", {
+    method: "POST",
+    body: JSON.stringify({ messages }),
+  });
 }
 
 export async function createResearchTask(question: string, contextScope?: string) {
