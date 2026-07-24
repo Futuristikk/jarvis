@@ -8,7 +8,7 @@ const backendBase =
   configuredBackend ||
   (Capacitor.isNativePlatform() ? PRODUCTION_BACKEND : window.location.origin);
 
-const API_BASE = `${backendBase.replace(/\\/+$/, "")}/api`;
+const API_BASE = `${backendBase.replace(/\/+$/, "")}/api`;
 
 export type TaskStatus =
   | "queued"
