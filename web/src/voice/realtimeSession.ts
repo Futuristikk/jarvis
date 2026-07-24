@@ -1,4 +1,5 @@
 import { executeVoiceTool, getRealtimeToken } from "../api";
+import { isNativeApp, requestMicrophoneAccess } from "../native";
 
 export type SessionState =
   | "idle"
@@ -135,14 +136,27 @@ export class RealtimeSession {
 
   private async requestMicrophone(): Promise<MediaStream> {
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Dein Browser unterstützt keinen Mikrofonzugriff.");
+      throw new Error(
+        isNativeApp()
+          ? "Die Android-System-WebView unterstützt auf diesem Gerät keinen Mikrofonzugriff. Aktualisiere Android System WebView und versuche es erneut."
+          : "Dein Browser unterstützt keinen Mikrofonzugriff.",
+      );
     }
     try {
+      await requestMicrophoneAccess();
       return await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Android-App-Einstellungen")
+      ) {
+        throw error;
+      }
       if (error instanceof DOMException && error.name === "NotAllowedError") {
         throw new Error(
-          "Der Mikrofonzugriff wurde abgelehnt. Erlaube ihn in den Website-Einstellungen.",
+          isNativeApp()
+            ? "Android oder die System-WebView hat den Mikrofonzugriff abgelehnt. Erlaube das Mikrofon für Jarvis in den Android-App-Einstellungen unter Berechtigungen."
+            : "Der Mikrofonzugriff wurde abgelehnt. Erlaube ihn in den Website-Einstellungen.",
         );
       }
       throw new Error("Das Mikrofon konnte nicht gestartet werden.");
