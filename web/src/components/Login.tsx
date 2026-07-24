@@ -17,7 +17,7 @@ export function Login() {
       if (ok) {
         setToken(password);
       } else {
-        setError("Wrong password");
+        setError("Falsches Passwort");
       }
     } catch {
       setError("Couldn't reach the server");
@@ -33,13 +33,13 @@ export function Login() {
         <input
           type="password"
           className="login-input"
-          placeholder="Password"
+          placeholder="Jarvis-Passwort"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
         <button type="submit" className="login-submit" disabled={submitting || !password}>
-          {submitting ? "Checking…" : "Unlock"}
+          {submitting ? "Prüfe…" : "Entsperren"}
         </button>
         {error ? <div className="login-error">{error}</div> : null}
       </form>

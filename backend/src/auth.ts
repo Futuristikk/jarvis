@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
-const PUBLIC_PREFIXES = ["/health", "/oauth/"];
+const PUBLIC_PREFIXES = ["/api/health", "/api/oauth/"];
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
