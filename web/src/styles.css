@@ -1278,3 +1278,36 @@ input, textarea { font-family: inherit; color: inherit; }
   opacity: 0;
   pointer-events: none;
 }
+
+.location-primary,
+.location-actions button {
+  min-height: 48px;
+  border: 1px solid rgba(255, 181, 71, 0.35);
+  border-radius: 12px;
+  padding: 0 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.location-primary {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.location-primary:disabled {
+  opacity: 0.55;
+}
+
+.location-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.location-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
