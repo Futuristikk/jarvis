@@ -3,7 +3,7 @@ import { Hono } from "hono";
 const MODEL = process.env.OPENAI_MODEL ?? "gpt-5.6";
 const OPENAI_BASE_URL = (
   process.env.OPENAI_BASE_URL ?? "https://api.openai.com"
-).replace(/\\/+$/, "");
+).replace(/\/+$/, "");
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_LENGTH = 4_000;
 
