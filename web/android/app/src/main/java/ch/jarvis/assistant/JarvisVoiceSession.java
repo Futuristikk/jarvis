@@ -10,6 +10,8 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.service.voice.VoiceInteractionSession;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -25,10 +27,19 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Locale;
 
+import ch.jarvis.assistant.action.ActionRequest;
+import ch.jarvis.assistant.action.ActionResult;
+import ch.jarvis.assistant.action.ActionType;
+import ch.jarvis.assistant.action.AndroidActionExecutor;
+import ch.jarvis.assistant.action.GermanCommandParser;
+
 public class JarvisVoiceSession extends VoiceInteractionSession
     implements RecognitionListener {
 
     private final Context context;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final GermanCommandParser commandParser = new GermanCommandParser();
+    private final AndroidActionExecutor actionExecutor;
     private SpeechRecognizer recognizer;
     private TextView statusView;
     private TextView transcriptView;
@@ -55,6 +66,7 @@ public class JarvisVoiceSession extends VoiceInteractionSession
     public JarvisVoiceSession(Context context) {
         super(context);
         this.context = context;
+        this.actionExecutor = new AndroidActionExecutor(context);
     }
 
     @Override
@@ -263,12 +275,52 @@ public class JarvisVoiceSession extends VoiceInteractionSession
         }
         setTranscript(matches.get(0));
         if (isFinal) {
-            listening = false;
-            setBusy(false);
-            setStatus("Auftrag erkannt");
-            primaryButton.setText("Fertig");
-            primaryButton.setOnClickListener(view -> finish());
+            executeRecognizedCommand(matches.get(0));
         }
+    }
+
+    private void executeRecognizedCommand(String spokenText) {
+        stopRecognition();
+        setBusy(true);
+        setStatus("Jarvis analysiert");
+        setTranscript(spokenText);
+
+        mainHandler.postDelayed(() -> {
+            ActionRequest request = commandParser.parse(spokenText);
+            ActionResult result = actionExecutor.execute(
+                request,
+                new AndroidActionExecutor.SessionController() {
+                    @Override
+                    public void goBack() {
+                        hide();
+                    }
+
+                    @Override
+                    public void closeAssistant() {
+                        finish();
+                    }
+                }
+            );
+
+            if (
+                request.getActionType() == ActionType.GO_BACK ||
+                request.getActionType() == ActionType.CLOSE_ASSISTANT
+            ) {
+                return;
+            }
+
+            setBusy(false);
+            setStatus(result.isSuccess() ? "Aktion abgeschlossen" : "Aktion nicht möglich");
+            setTranscript(result.getMessage());
+
+            if (result.isSuccess() && result.isTargetOpened()) {
+                mainHandler.postDelayed(this::finish, 500L);
+                return;
+            }
+
+            primaryButton.setText("Erneut versuchen");
+            primaryButton.setOnClickListener(view -> startListening());
+        }, 150L);
     }
 
     @Override
