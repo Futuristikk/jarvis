@@ -111,7 +111,7 @@ public final class GermanCommandParser {
             normalized.equals("öffne whatsapp") ||
             normalized.equals("starte whatsapp")
         ) {
-            return ActionRequest.of(ActionType.OPEN_WHATSAPP)
+            return ActionRequest.of(ActionType.OPEN_APP)
                 .withTargetApp("whatsapp");
         }
 
