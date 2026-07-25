@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.util.Patterns;
 
 import androidx.core.content.FileProvider;
@@ -16,6 +17,12 @@ import java.io.IOException;
 import java.util.Locale;
 
 public final class AndroidActionExecutor {
+    private static final String TAG = "JarvisActionExecutor";
+
+    public interface ActivityLauncher {
+        void launch(Intent intent);
+    }
+
     public interface SessionController {
         void goBack();
         void closeAssistant();
@@ -25,20 +32,27 @@ public final class AndroidActionExecutor {
     private final PackageManager packageManager;
     private final AppRegistry appRegistry;
     private final ConfirmationManager confirmationManager;
+    private final ActivityLauncher activityLauncher;
 
-    public AndroidActionExecutor(Context context) {
+    public AndroidActionExecutor(
+        Context context,
+        ActivityLauncher activityLauncher
+    ) {
         this.context = context;
         this.packageManager = context.getPackageManager();
         this.appRegistry = new AppRegistry(context);
         this.confirmationManager = new ConfirmationManager();
+        this.activityLauncher = activityLauncher;
     }
 
     public ActionResult execute(
         ActionRequest request,
         SessionController sessionController
     ) {
+        Log.i(TAG, "Executor gestartet: " + request.getActionType());
         ActionResult validation = confirmationManager.validate(request);
         if (!validation.isSuccess()) {
+            Log.w(TAG, "Sicherheitsprüfung abgelehnt: " + request.getActionType());
             return validation;
         }
         if (request.getTimeoutMs() <= 0 || request.getTimeoutMs() > 60_000L) {
@@ -77,14 +91,17 @@ public final class AndroidActionExecutor {
                     );
             }
         } catch (ActivityNotFoundException exception) {
+            Log.e(TAG, "Keine Activity für " + request.getActionType(), exception);
             return ActionResult.failure(
                 "Für diese Aktion wurde keine passende Android-App gefunden."
             );
         } catch (SecurityException exception) {
+            Log.e(TAG, "Android blockiert " + request.getActionType(), exception);
             return ActionResult.failure(
                 "Android hat diese Aktion aus Sicherheitsgründen blockiert."
             );
         } catch (IOException exception) {
+            Log.e(TAG, "I/O-Fehler bei " + request.getActionType(), exception);
             return ActionResult.failure(
                 "Das temporäre Foto konnte nicht sicher vorbereitet werden."
             );
@@ -290,7 +307,20 @@ public final class AndroidActionExecutor {
         );
     }
 
+    private void launchActivity(Intent intent) {
+        Log.i(
+            TAG,
+            "Activity-Start angefordert: " +
+            (intent.getPackage() == null ? "impliziter Intent" : intent.getPackage())
+        );
+        activityLauncher.launch(intent);
+        Log.i(TAG, "Activity-Start an VoiceInteractionSession übergeben.");
+    }
+
     private boolean canResolve(Intent intent) {
-        return intent != null && intent.resolveActivity(packageManager) != null;
+        boolean resolved =
+            intent != null && intent.resolveActivity(packageManager) != null;
+        Log.i(TAG, "Intent auflösbar: " + resolved);
+        return resolved;
     }
 }
