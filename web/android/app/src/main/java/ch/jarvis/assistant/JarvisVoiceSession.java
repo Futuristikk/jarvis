@@ -16,6 +16,7 @@ import android.service.voice.VoiceInteractionSession;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -35,6 +36,8 @@ import ch.jarvis.assistant.action.GermanCommandParser;
 
 public class JarvisVoiceSession extends VoiceInteractionSession
     implements RecognitionListener {
+
+    private static final String TAG = "JarvisVoiceFlow";
 
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -66,7 +69,14 @@ public class JarvisVoiceSession extends VoiceInteractionSession
     public JarvisVoiceSession(Context context) {
         super(context);
         this.context = context;
-        this.actionExecutor = new AndroidActionExecutor(context);
+        this.actionExecutor = new AndroidActionExecutor(
+            context,
+            intent -> {
+                Log.i(TAG, "startVoiceActivity wird aufgerufen.");
+                startVoiceActivity(intent);
+                Log.i(TAG, "startVoiceActivity wurde ausgeführt.");
+            }
+        );
     }
 
     @Override
@@ -267,10 +277,12 @@ public class JarvisVoiceSession extends VoiceInteractionSession
     }
 
     private void showRecognizedText(Bundle results, boolean isFinal) {
+        Log.i(TAG, "Sprachergebnis empfangen. Final: " + isFinal);
         ArrayList<String> matches = results.getStringArrayList(
             SpeechRecognizer.RESULTS_RECOGNITION
         );
         if (matches == null || matches.isEmpty()) {
+            Log.w(TAG, "Sprachergebnis enthält keinen erkannten Text.");
             return;
         }
         setTranscript(matches.get(0));
@@ -286,7 +298,10 @@ public class JarvisVoiceSession extends VoiceInteractionSession
         setTranscript(spokenText);
 
         mainHandler.postDelayed(() -> {
+            Log.i(TAG, "Erkannter Text wird lokal geparst.");
             ActionRequest request = commandParser.parse(spokenText);
+            Log.i(TAG, "Parser-Ergebnis: " + request.getActionType());
+            Log.i(TAG, "AndroidActionExecutor.execute wird aufgerufen.");
             ActionResult result = actionExecutor.execute(
                 request,
                 new AndroidActionExecutor.SessionController() {
@@ -300,6 +315,12 @@ public class JarvisVoiceSession extends VoiceInteractionSession
                         finish();
                     }
                 }
+            );
+
+            Log.i(
+                TAG,
+                "Executor-Ergebnis: Erfolg=" + result.isSuccess() +
+                ", Ziel geöffnet=" + result.isTargetOpened()
             );
 
             if (
@@ -383,6 +404,7 @@ public class JarvisVoiceSession extends VoiceInteractionSession
 
     @Override
     public void onResults(Bundle results) {
+        Log.i(TAG, "SpeechRecognizer.onResults wurde aufgerufen.");
         showRecognizedText(results, true);
     }
 
