@@ -196,12 +196,12 @@ public final class AndroidActionExecutor {
         );
         Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
             .putExtra(MediaStore.EXTRA_OUTPUT, outputUri)
-            .setClipData(ClipData.newRawUri("Jarvis-Foto", outputUri))
             .addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                 Intent.FLAG_GRANT_READ_URI_PERMISSION |
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             );
+        intent.setClipData(ClipData.newRawUri("Jarvis-Foto", outputUri));
         if (!canResolve(intent)) {
             return ActionResult.failure(
                 "Auf diesem Gerät wurde keine Kamera-App gefunden."
