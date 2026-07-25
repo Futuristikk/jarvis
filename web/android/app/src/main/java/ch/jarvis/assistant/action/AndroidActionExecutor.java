@@ -125,7 +125,7 @@ public final class AndroidActionExecutor {
                 app.getDisplayName() + " kann nicht geöffnet werden."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success(
             app.getDisplayName() + " wird geöffnet.",
             true
@@ -159,7 +159,7 @@ public final class AndroidActionExecutor {
                 "Auf diesem Gerät ist kein geeigneter Browser verfügbar."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success("Die Internetseite wird geöffnet.", true);
     }
 
@@ -181,7 +181,7 @@ public final class AndroidActionExecutor {
                 "Auf diesem Gerät ist kein geeigneter Browser verfügbar."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success(
             "Ich suche im Internet nach " + query.trim() + ".",
             true
@@ -196,7 +196,7 @@ public final class AndroidActionExecutor {
                 "Auf diesem Gerät wurde keine Kamera-App gefunden."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success("Ich öffne die Kamera.", true);
     }
 
@@ -224,7 +224,7 @@ public final class AndroidActionExecutor {
                 "Auf diesem Gerät wurde keine Kamera-App gefunden."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success(
             "Die Kamera ist bereit. Du löst das Foto selbst aus.",
             true
@@ -262,7 +262,7 @@ public final class AndroidActionExecutor {
                 "Es wurde keine E-Mail-App für einen sicheren Entwurf gefunden."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success(
             "Der E-Mail-Entwurf wird geöffnet. Du sendest ihn selbst.",
             true
@@ -283,7 +283,7 @@ public final class AndroidActionExecutor {
             if (!canResolve(launchIntent)) {
                 return ActionResult.failure("WhatsApp kann nicht geöffnet werden.");
             }
-            context.startActivity(launchIntent);
+            launchActivity(launchIntent);
             return ActionResult.success(
                 "WhatsApp wird geöffnet. Wähle den Kontakt und schreibe die Nachricht selbst.",
                 true
@@ -300,7 +300,7 @@ public final class AndroidActionExecutor {
                 "WhatsApp kann den vorbereiteten Text nicht übernehmen."
             );
         }
-        context.startActivity(intent);
+        launchActivity(intent);
         return ActionResult.success(
             "WhatsApp wird mit dem vorbereiteten Text geöffnet. Du sendest selbst.",
             true
